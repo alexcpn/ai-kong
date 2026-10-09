@@ -2,6 +2,8 @@
 
 ## AI Kong - A fun take on Donkey Kong
 
+Code and data: [github.com/alexcpn/ai-kong](https://github.com/alexcpn/ai-kong)
+
 *9 October 2026 · Alex Punnen*
 
 LLMs are graded on intelligence, not speed. The smartest ones are too big or power-hungry for the edge, so they run in the cloud and pay network latency on top. For real-time reasoning in games, cars or robots, that is a problem.
@@ -48,7 +50,7 @@ Through OpenRouter, the fastest setups answered a taunt in 0.37 s, chose a move 
 
 ![Median seconds per call for taunt replies, tactician calls and strategy calls across models and providers, with worst-of-5 lines; calls over 2 s are shaded](images/measured-latency.png)
 
-*Measured 9 Oct 2026 through OpenRouter, provider pinned, strict JSON output · [data-2026-10.json](../llm-speed/data-2026-10.json)*
+*Measured 9 Oct 2026 through OpenRouter, provider pinned, strict JSON output · [data-2026-10.json](https://github.com/alexcpn/ai-kong/blob/main/docs/llm-speed/data-2026-10.json)*
 
 Every call used the game's real prompt and a strict JSON schema, with the provider pinned and fallbacks off. The samples are small, so read the medians as orders of magnitude and the worst-of-5 lines as warnings.
 
@@ -119,7 +121,7 @@ So a small local model can run the fast layer below a second, the way Helix's Sy
 
 ## Reproduce it
 
-The game, the director library and the benchmark scripts are in the AI Kong repository. The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](../llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](../llm-speed/) re-run each measurement through OpenRouter for well under a cent each (`bench_local_ollama.py` and `bench_tactics_quality.py` cover the local GPU). The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](../../.config/config.env).
+The game, the director library and the benchmark scripts are in [github.com/alexcpn/ai-kong](https://github.com/alexcpn/ai-kong). The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](https://github.com/alexcpn/ai-kong/blob/main/docs/llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](https://github.com/alexcpn/ai-kong/tree/main/docs/llm-speed) re-run each measurement through OpenRouter for well under a cent each (`bench_local_ollama.py` and `bench_tactics_quality.py` cover the local GPU). The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](https://github.com/alexcpn/ai-kong/blob/main/.config/config.env).
 
 ## Sources
 

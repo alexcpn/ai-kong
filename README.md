@@ -6,9 +6,14 @@ A terminal Donkey Kong where Kong can be driven by an LLM that **studies how you
 its tactics**, without ever making the game lag. Pure Python standard library: no installs
 (`python-dotenv` is optional, to load settings from `.config/`).
 
+The article behind it, with published and measured LLM speed and cost data:
+[Using Slow Reasoning LLMs for Fast Games](docs/article/llm-real-time-game-2026-10.md).
+
 ## Quick start
 
 ```bash
+git clone https://github.com/alexcpn/ai-kong.git && cd ai-kong
+
 python3 dk.py                                      # menu: pick an opponent and a board
 
 # no LLM, for testing without a key
@@ -170,8 +175,8 @@ typed knobs in any real-time game or simulation.
 ## Tests
 
 ```bash
-python3 -m unittest discover .        # from dk-game/: game + director library tests
+python3 -m unittest discover .        # from the repo root: game + director library tests
 ```
 
 This game came out of DK-Bench, an experiment in benchmarking coding agents. That benchmark lives in a
-separate repository and embeds this folder; you don't need it to play.
+separate repository and embeds this one; you don't need it to play.

@@ -174,7 +174,7 @@ game's rules threatens a near-perfect planner. A director can only be as cunning
 ## Tests
 
 ```bash
-python3 -m unittest discover director        # from dk-game/
+python3 -m unittest discover director        # from the repo root
 ```
 
 ## Limits
