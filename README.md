@@ -101,5 +101,5 @@ typed knobs in any real-time game or simulation.
 python3 -m unittest discover .        # from dk-game/: game + director library tests
 ```
 
-This game came out of a benchmark experiment; the benchmark lives in the parent repository and
-imports this folder. You don't need any of it to play.
+This game came out of DK-Bench, an experiment in benchmarking coding agents. That benchmark lives in a
+separate repository and embeds this folder; you don't need it to play.
