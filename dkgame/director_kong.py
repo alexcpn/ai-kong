@@ -166,17 +166,6 @@ def snapshot_game(game):
     return copy.deepcopy(game, memo={id(game.kong): None})
 
 
-def playable_copy(game):
-    """A copy of a live game to simulate moves on. An LLM Kong (threads, network) can't be copied, so
-    the copy gets a deterministic stand-in with his current knobs; scripted Kongs are copied as-is."""
-    kong = game.kong
-    if not isinstance(kong, DirectorKong):
-        return copy.deepcopy(game)
-    stand_in = ParametricKong(kong.knobset.snapshot())
-    stand_in.rng, stand_in.hold_until = copy.deepcopy(kong.rng), kong.hold_until
-    return copy.deepcopy(game, memo={id(kong): stand_in})
-
-
 def simulate(snapshot, knobs: dict, rollout: int, seconds: float = 8.0) -> dict:
     """Can an omniscient player survive `seconds` of these knobs from this state?"""
     sim = copy.deepcopy(snapshot)

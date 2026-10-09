@@ -96,10 +96,7 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     bottom = oy + floors[0] + 2
     if hud.get("plan"):
         put(win, bottom, left, f"Kong's plan: {hud['plan']}"[: layout["width"]], c("goal"))
-    if hud.get("controls"):
-        put(win, bottom + 1, left, hud["controls"], c("goal") | curses.A_BOLD)
-    else:
-        put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  H agent  P pause  Q quit", c("ui"))
+    put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  T taunt  P pause  Q quit", c("ui"))
     if hud.get("footer"):
         put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)],
             c("player") | curses.A_BOLD if hud["footer"].startswith("TAUNT") else c("ui"))

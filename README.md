@@ -23,6 +23,17 @@ KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai --board tall
 Options: `--kong ai|classic`, `--board random|classic|tall|sparse`,
 `--seed N`. Without `--kong` you get the menu.
 
+In a game: arrows (or WASD) move, Space jumps, **T** taunts Kong, P pauses, Q quits.
+
+**Default models:** `anthropic/claude-haiku-5.5` for both of AI Kong's LLM calls: the strategist
+(medium reasoning, every ~20 s and when you lose a life or clear a level) and the voice that answers
+taunts (no reasoning, so it replies in about 2 s). Change them with `KONG_DIRECTOR_MODEL` /
+`KONG_DIRECTOR_REASONING` and `KONG_VOICE_MODEL` (shell or `.config/config.env`).
+
+**Cost per session (measured with the defaults):** about $0.0006 per strategy call and $0.0001 per
+taunt reply. With 3-5 strategy calls a minute that's roughly $0.002-0.003 per minute of play, so
+2-3 cents for a 10-minute session. The running total is shown at the bottom right while you play.
+
 To configure AI Kong from files instead of the shell, put the key in
 `.config/opneroutere.env` (git-ignored; copy `.config/opneroutere.env.ex`) and settings in
 `.config/config.env`, then `pip install python-dotenv`. `dk.py` loads both at start-up, and
@@ -35,11 +46,10 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 
 | Key | Action |
 |---|---|
-| ← → / A D | walk (you can steer in the air) |
-| ↑ ↓ / W S | climb up / down a ladder (step off mid-ladder to drop) |
+| ← → / A D / H L | walk (you can steer in the air) |
+| ↑ ↓ / W S / K J | climb up / down a ladder (step off mid-ladder to drop) |
 | Space / Enter | jump (hold for a little extra height) |
 | T | taunt Kong: ←→ pick a line, Enter sends, Esc cancels (once every 4 s) |
-| H | hand the game to an agent; H again takes it back (agent-assisted games don't set high scores) |
 | P | pause |
 | Q | end the game |
 
@@ -55,10 +65,6 @@ above you, climbing as you climb (up to the top girder), and throws from whereve
 picks the spot, e.g. above a ladder you need). Catch him anywhere but the top girder and he's beaten.
 He has 45 barrels on level 1, 8 more each level, shown as `●×45` at the top; they refill on a new
 level, not when you lose a life.
-
-**Hand over to an agent**: press H and a lookahead agent plays for you (it simulates its moves a
-couple of seconds ahead); press H again to take back control. Handy for watching AI Kong think, or
-for getting past a hard spot. A game the agent helped with doesn't set a high score.
 
 **Taunts and Kong's temper**: press T and pick a line ("Bet you can't hit me on a ladder.", "I'm
 taking the left ladder." ...). Each taunt fills Kong's ANGER meter (it cools while he sits at the top),
@@ -98,8 +104,8 @@ chmod 600 ~/.config/dk-game/openrouter.env
 ```
 
 (or export `OPENROUTER_API_KEY`). The default model is `anthropic/claude-haiku-5.5` with medium
-reasoning; at about one call every 20 seconds that should cost in the region of a cent per few minutes
-of play (an estimate). To use another model:
+reasoning; that costs roughly $0.002-0.003 per minute of play (see Quick start). To use another
+model:
 
 ```bash
 KONG_DIRECTOR_MODEL=openai/gpt-oss-120b python3 dk.py --kong ai

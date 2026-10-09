@@ -7,8 +7,8 @@
 
 Opponents: ai (AI Kong, an LLM that profiles how you play and re-plans Kong's tactics; needs an
 OpenRouter key, see README.md) and classic (scripted, no LLM: for testing without a key).
-Keys: arrows / WASD move and climb, Space jumps (hold for extra height), T taunts Kong, H hands the
-game to an agent (H again takes it back), P pauses, Q quits.
+Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), T taunts Kong,
+P pauses, Q quits.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ sys.path.insert(0, HERE)
 from director import load_api_key  # noqa: E402
 from dkgame.engine import CLASSIC_LAYOUT, TICK, Game, Params, generate_layout  # noqa: E402
 from dkgame.kongs import SCRIPTED  # noqa: E402
-from dkgame.lookahead import LookaheadPlayer  # noqa: E402
 from dkgame.render import centre, draw_game, needed_size, put, setup_colors  # noqa: E402
 
 OPPONENTS = [("ai", "AI Kong"), ("classic", "Classic (no LLM)")]   # dkgame.kongs has more scripted Kongs
@@ -35,6 +34,7 @@ BOARDS = [("random", "Random board"), ("classic", "Classic board"), ("tall", "Ta
           ("sparse", "Sparse (1 ladder each)")]
 KEYMAP = {curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right", curses.KEY_UP: "up", curses.KEY_DOWN: "down",
           ord("a"): "left", ord("d"): "right", ord("w"): "up", ord("s"): "down",
+          ord("h"): "left", ord("l"): "right", ord("k"): "up", ord("j"): "down",
           ord(" "): "jump", ord("\n"): "jump"}
 HOLD = {"left": 0.11, "right": 0.11, "up": 0.16, "down": 0.16, "jump": 0.2}   # no key-up events in terminals
 TAUNTS = ["Is that all you've got?", "You throw like my grandma!", "Too slow, old ape!",
@@ -201,7 +201,6 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
     held: dict[str, float] = {}
     paused, next_tick = False, time.monotonic()
     taunt = {"open": False, "pick": 0, "next": 0.0, "said": "", "until": 0.0}
-    agent, assisted = None, False             # H hands the controls to a lookahead agent and back
 
     def hud(banner: str = "") -> dict:
         plan = kong.display() if hasattr(kong, "display") else ""
@@ -217,10 +216,9 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             wait = taunt["next"] - game.t
             bar = "█" * int(game.anger / 10) + "░" * (10 - int(game.anger / 10))
             footer = f"ANGER {bar}   " + ("T taunt Kong" if wait <= 0 else f"taunt in {int(wait) + 1}s")
-        controls = "AGENT PLAYING  ·  H take back   T taunt  P pause  Q quit" if agent else ""
         llm, cost = kong.llm_status() if hasattr(kong, "llm_status") else ("", "")
         return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
-                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer, "controls": controls,
+                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer,
                 "llm": llm, "cost": cost}
 
     while not game.over:
@@ -247,14 +245,6 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             if key in (ord("q"), ord("Q")):
                 game.over = True
                 break
-            if key in (ord("h"), ord("H")):
-                if agent is None:
-                    from dkgame.director_kong import playable_copy
-                    agent, assisted = LookaheadPlayer(copy_game=playable_copy), True
-                else:
-                    agent = None
-                held.clear()
-                continue
             if key in (ord("t"), ord("T")) and game.t >= taunt["next"] and game.kong_body.mode == "perch":
                 taunt["open"] = True
                 held.clear()
@@ -263,7 +253,7 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
                 held.clear()
             elif key == curses.KEY_RESIZE:
                 pass
-            elif KEYMAP.get(key) and agent is None:
+            elif KEYMAP.get(key):
                 held[KEYMAP[key]] = now + HOLD[KEYMAP[key]]
         if taunt["open"]:
             draw_game(win, lay, game.state(), hud())
@@ -279,7 +269,7 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             h, w = win.getmaxyx()
             need_h, need_w = needed_size(lay)
             if h >= need_h and w >= need_w:                    # freeze the game while the window is too small
-                game.step(agent.act(game) if agent else [k for k, until in held.items() if until >= now])
+                game.step([k for k, until in held.items() if until >= now])
                 scorer.update(game)
             next_tick += TICK
             if next_tick < now - 0.25:
@@ -287,11 +277,11 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             draw_game(win, lay, game.state(), hud())
         time.sleep(max(0.0, min(0.01, next_tick - time.monotonic())))
 
-    new_best = scorer.score > best and not assisted          # games the agent helped with don't set records
+    new_best = scorer.score > best
     if new_best:
         scores[opponent] = scorer.score
         save_scores(scores)
-    note = "  NEW BEST!" if new_best else "  (agent-assisted)" if assisted else ""
+    note = "  NEW BEST!" if new_best else ""
     cost = f"  LLM {kong.llm_status()[1]}" if hasattr(kong, "llm_status") else ""
     summary = f" GAME OVER  score {scorer.score:06d}{note}  level {game.level}{cost} "
     draw_game(win, lay, game.state(), {**hud(summary), "best": max(best, scorer.score)})

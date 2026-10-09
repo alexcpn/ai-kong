@@ -301,35 +301,5 @@ class KongMovesTests(unittest.TestCase):
         self.assertGreater(len(xs), 6)
 
 
-class AgentTests(unittest.TestCase):
-    def test_agent_can_play_against_a_live_ai_kong(self):
-        import time
-        from dkgame.director_kong import DEFAULT_KNOBS, DirectorKong, playable_copy
-        from dkgame.lookahead import LookaheadPlayer
-
-        class Stub:
-            def ask(self, layer, system, prompt, schema, validate):
-                return validate({"opponent_model": "", "strategy": "s", "reasons": "", "taunt": "",
-                                 "knobs": dict(DEFAULT_KNOBS)})
-
-            def total_usage(self):
-                return {}
-
-        layout, params = dk.make_variant("classic", 8)
-        kong = DirectorKong(background=True, client=Stub(), guard=False)
-        game = Game(layout, params, kong, seed=8)
-        kong.attach(game)
-        agent = LookaheadPlayer(copy_game=playable_copy)
-        worst = 0.0
-        for _ in range(400):
-            started = time.perf_counter()
-            keys = agent.act(game)
-            worst = max(worst, time.perf_counter() - started)
-            game.step(keys)
-        self.assertGreater(game.highest + game.levels_cleared, 0)            # it made progress
-        self.assertIs(game.kong, kong)                                         # the live Kong was never replaced
-        self.assertLess(worst, 0.25)
-
-
 if __name__ == "__main__":
     unittest.main()

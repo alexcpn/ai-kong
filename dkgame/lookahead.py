@@ -2,7 +2,7 @@
 
 It sees the future (it copies Kong's random state too), so it is an upper bound, not a fair
 competitor. Used by the director's fairness guard ("can even a perfect player survive these
-settings?"), as a strong reference player, and as the agent you can hand the game to (H key).
+settings?") and as a strong reference player.
 """
 
 from __future__ import annotations
@@ -46,9 +46,8 @@ def value(game, lives0: int, level0: int) -> float:
 
 
 class LookaheadPlayer:
-    def __init__(self, horizon: int = 40, commit: int = 6, replan_every: int = 3, copy_game=copy.deepcopy) -> None:
+    def __init__(self, horizon: int = 40, commit: int = 6, replan_every: int = 3) -> None:
         self.horizon, self.commit, self.replan_every = horizon, commit, replan_every
-        self.copy_game = copy_game          # how to copy the game for a rollout (live Kongs may need a stand-in)
         self._action: tuple = ()
         self._since = 0
 
@@ -56,7 +55,7 @@ class LookaheadPlayer:
         best, best_v = "greedy", -1e18
         for first in ACTIONS:                   # "greedy" first, so ties favour making progress now
             for then in FOLLOW_UPS:
-                sim = self.copy_game(game)
+                sim = copy.deepcopy(game)
                 lives0, level0 = sim.lives, sim.level
                 for i in range(self.horizon):
                     if i < self.commit:
