@@ -301,5 +301,59 @@ class KongMovesTests(unittest.TestCase):
         self.assertGreater(len(xs), 6)
 
 
+class CollisionTests(unittest.TestCase):
+    def test_a_barrel_cannot_slip_past_by_swapping_columns(self):
+        from dkgame.engine import Barrel
+        layout, params = dk.make_variant("classic", 9)
+        game = Game(layout, params, Quiet(), seed=9)
+        p = game.player
+        p.invuln_until, p.x, p.next_walk = 0.0, 20, 0.0
+        barrel = Barrel(id=999, x=21, floor=0, y=p.y, direction=-1, step_gap=0.15, route="never",
+                        step_at=game.t + 0.04)                 # steps left this tick, as the player steps right
+        game.barrels.append(barrel)
+        lives = game.lives
+        game.step(["right"])
+        self.assertEqual(game.lives, lives - 1)
+        self.assertEqual(game.stats["hits_barrel"], 1)
+
+    def test_jumping_over_a_swapping_barrel_still_counts(self):
+        from dkgame.engine import Barrel
+        layout, params = dk.make_variant("classic", 9)
+        game = Game(layout, params, Quiet(), seed=9)
+        p = game.player
+        p.invuln_until = 0.0
+        game.step(["jump"])
+        for _ in range(4):
+            game.step(["jump"])                                 # high enough to clear a barrel
+        p.next_walk = game.t
+        barrel = Barrel(id=999, x=p.x + 1, floor=0, y=float(layout.floors[0]), direction=-1, step_gap=0.15,
+                        route="never", step_at=game.t + 0.04)
+        game.barrels.append(barrel)
+        lives = game.lives
+        game.step(["right"])
+        self.assertEqual(game.lives, lives)
+        self.assertEqual(game.stats["jumped_over"], 1)
+
+    def test_no_more_pass_throughs_for_a_search_player(self):
+        from dkgame.director_kong import ParametricKong
+        from dkgame.lookahead import LookaheadPlayer
+        layout, params = dk.make_variant("random", 0)
+        game = Game(layout, params, ParametricKong(), seed=0)
+        player, slips = LookaheadPlayer(), 0
+        for _ in range(500):
+            if game.over:
+                break
+            p = game.player
+            before = {b.id: b.x for b in game.barrels}
+            px, lives, safe = p.x, game.lives, game.t < p.invuln_until
+            game.step(player.act(game))
+            if game.lives < lives or safe:
+                continue
+            q = game.player
+            slips += sum(1 for b in game.barrels if b.id in before and abs(b.y - q.y) < params.hit_rows
+                         and (before[b.id] - px) * (b.x - q.x) < 0)
+        self.assertEqual(slips, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

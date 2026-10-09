@@ -270,6 +270,7 @@ class Game:
         self._wait = {"x": None, "t": 0.0}
         self._next_id = 1
         self._prev_keys: frozenset[str] = frozenset()
+        self._start_x: tuple[int, dict, dict] = (0, {}, {})   # player / barrel / fireball columns at tick start
         self._start_level()
 
     # ----------------------------------------------------------------- helpers
@@ -789,9 +790,16 @@ class Game:
             self._event("kong_defeated", floor=k.floor, x=k.x)
             self._kong_beaten = True
             return
+        px0, barrel_x0, fireball_x0 = self._start_x
+
+        def meets(ident: int, x: int, start: dict) -> bool:
+            """Same column now, or the two swapped columns this tick (they passed through each other)."""
+            x0 = start.get(ident)
+            return x == p.x or (x0 is not None and (x0 - px0) * (x - p.x) < 0)
+
         for b in self.barrels:
-            if b.x == p.x and not b.passed_player and p.mode == "air" and b.y - p.y >= prm.hit_rows \
-                    and abs(b.floor - p.floor) == 0:
+            if meets(b.id, b.x, barrel_x0) and not b.passed_player and p.mode == "air" \
+                    and b.y - p.y >= prm.hit_rows and abs(b.floor - p.floor) == 0:
                 b.passed_player = True
                 self.stats["jumped_over"] += 1
                 self._outcome(b.id, f"jumped over on floor {p.floor} at x={p.x}")
@@ -799,12 +807,12 @@ class Game:
         if self.t < p.invuln_until:
             return
         for b in self.barrels:
-            if b.x == p.x and abs(b.y - p.y) < prm.hit_rows:
+            if meets(b.id, b.x, barrel_x0) and abs(b.y - p.y) < prm.hit_rows:
                 self._outcome(b.id, f"HIT the player on floor {p.floor} at x={p.x} ({p.mode})")
                 self._hit("barrel")
                 return
         for f in self.fireballs:
-            if f.x != p.x or abs(f.y - p.y) >= prm.hit_rows:
+            if not meets(f.id, f.x, fireball_x0) or abs(f.y - p.y) >= prm.hit_rows:
                 continue
             if prev_mode == "air" and prev_vy > 0 and prev_y < f.y - 0.01:
                 self.fireballs.remove(f)
@@ -850,6 +858,7 @@ class Game:
         if self.over:
             return
         keys = frozenset(k for k in keys if k in ("left", "right", "up", "down", "jump"))
+        self._start_x = (self.player.x, {b.id: b.x for b in self.barrels}, {f.id: f.x for f in self.fireballs})
         p = self.player
         horiz = ("right" in keys) - ("left" in keys)
         vert = ("up" in keys) - ("down" in keys)
