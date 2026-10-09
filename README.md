@@ -1,6 +1,5 @@
-# AI Kong
+# AI Kong: A Pattern for using Slow Reasoning LLMs for Fast Games
 
-Donkey Kong, against a Kong that thinks.
 
 A terminal Donkey Kong where Kong can be driven by an LLM that **studies how you play and re-plans
 its tactics**, without ever making the game lag. Pure Python standard library: no installs
