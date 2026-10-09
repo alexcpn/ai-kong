@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""Donkey Kong for the terminal, against a Kong that can think.
+
+  python3 dk.py                            # title menu
+  python3 dk.py --kong director            # straight into a game vs the AI director
+  python3 dk.py --kong sniper --board tall --seed 7
+
+Opponents: classic, random, aim, sniper, trick (scripted), director (an LLM that profiles how you
+play and re-plans Kong's tactics; needs an OpenRouter key, see README.md).
+Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), P pauses, Q quits.
+"""
+
+from __future__ import annotations
+
+import argparse
+import curses
+import json
+import os
+import random
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+from director import load_api_key  # noqa: E402
+from dkgame.engine import CLASSIC_LAYOUT, TICK, Game, Params, generate_layout  # noqa: E402
+from dkgame.kongs import SCRIPTED  # noqa: E402
+from dkgame.render import centre, draw_game, needed_size, put, setup_colors  # noqa: E402
+
+OPPONENTS = [("classic", "Classic"), ("random", "Random"), ("aim", "Aim"), ("sniper", "Sniper"),
+             ("trick", "Trickster"), ("director", "AI Director")]
+BOARDS = [("random", "Random board"), ("classic", "Classic board"), ("tall", "Tall (6 girders)"),
+          ("sparse", "Sparse (1 ladder each)")]
+KEYMAP = {curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right", curses.KEY_UP: "up", curses.KEY_DOWN: "down",
+          ord("a"): "left", ord("d"): "right", ord("w"): "up", ord("s"): "down",
+          ord("h"): "left", ord("l"): "right", ord("k"): "up", ord("j"): "down",
+          ord(" "): "jump", ord("\n"): "jump"}
+HOLD = {"left": 0.11, "right": 0.11, "up": 0.16, "down": 0.16, "jump": 0.2}   # no key-up events in terminals
+POINTS = {"climb": 100, "jump": 100, "stomp": 200, "level": 1000, "time": 10}
+
+
+# --------------------------------------------------------------------------- scores
+
+def score_path() -> str:
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "dk-game", "highscores.json")
+
+
+def load_scores() -> dict:
+    try:
+        with open(score_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+        return {k: int(v) for k, v in data.items() if isinstance(v, (int, float)) and v >= 0}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def save_scores(scores: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(score_path()), exist_ok=True)
+        with open(score_path(), "w", encoding="utf-8") as handle:
+            json.dump(scores, handle)
+    except OSError:
+        pass
+
+
+class Scorer:
+    """Arcade points from the engine's own statistics (no farming: climbs count once per girder)."""
+
+    def __init__(self) -> None:
+        self.score = 0
+        self.seen = {"climbs": 0, "jumped_over": 0, "stomps": 0, "levels": 0}
+        self.time_left = 0.0
+        self.popups: list[dict] = []
+
+    def update(self, game: Game) -> None:
+        s, p = game.stats, game.player
+        gained = (POINTS["climb"] * (s["climbs"] - self.seen["climbs"])
+                  + POINTS["jump"] * (s["jumped_over"] - self.seen["jumped_over"])
+                  + POINTS["stomp"] * (s["stomps"] - self.seen["stomps"]))
+        cleared = game.levels_cleared - self.seen["levels"]
+        if cleared:
+            gained += cleared * (POINTS["level"] * game.level + POINTS["time"] * int(self.time_left))
+        self.seen = {"climbs": s["climbs"], "jumped_over": s["jumped_over"], "stomps": s["stomps"],
+                     "levels": game.levels_cleared}
+        self.time_left = game.time_left
+        if gained:
+            self.score += gained
+            self.popups.append({"x": p.x, "y": p.y - 1, "text": f"+{gained}", "until": game.t + 1.0})
+        self.popups = [q for q in self.popups if q["until"] > game.t]
+
+
+# --------------------------------------------------------------------------- setup
+
+def make_variant(board: str, seed: int):
+    rng = random.Random(seed * 31 + 5)
+    params = Params(max_levels=99)                                     # endless: play for score
+    if board == "classic":
+        return CLASSIC_LAYOUT, params
+    floors = 6 if board == "tall" else None
+    ladders = 1 if board == "sparse" else 2
+    return generate_layout(seed, floors=floors, max_ladders=ladders), params.scaled(rng, 0.06)
+
+
+def make_kong(name: str):
+    if name == "director":
+        from director import Layer
+        from dkgame.director_kong import DirectorKong
+        return DirectorKong(background=True, layer=Layer.from_env("director", "medium", 8000))
+    return SCRIPTED[name]()
+
+
+# --------------------------------------------------------------------------- screens
+
+TITLE = [
+    "▐█▌  ●   ●   ●",
+    "▀█▀            ",
+    "",
+    "D O N K E Y   K O N G",
+    "against a Kong that thinks",
+]
+
+
+def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
+    win.nodelay(False)
+    row = 2
+    while True:
+        win.erase()
+        top = max(1, win.getmaxyx()[0] // 2 - 10)
+        for i, line in enumerate(TITLE):
+            centre(win, top + i, line, curses.A_BOLD if i in (0, 1, 3) else 0)
+        opp = OPPONENTS[choice["opponent"]]
+        brd = BOARDS[choice["board"]]
+        rows = [f"Opponent:  <  {opp[1]:^14}  >", f"Board:     <  {brd[1]:^22}  >", "[  PLAY  ]", "[  QUIT  ]"]
+        for i, text in enumerate(rows):
+            centre(win, top + 7 + i * 2, text, curses.A_REVERSE if i == row else 0)
+        best = scores.get(opp[0], 0)
+        centre(win, top + 16, f"Best vs {opp[1]}: {best:06d}")
+        if opp[0] == "director":
+            note = ("An LLM studies your habits and re-plans Kong's tactics every ~20 s."
+                    if has_key else "Needs an OpenRouter key: see README.md (key file not found).")
+            centre(win, top + 18, note)
+        centre(win, top + 20, "↑↓ choose   ←→ change   ENTER play   Q quit")
+        win.refresh()
+        key = win.getch()
+        if key in (ord("q"), ord("Q"), 27):
+            return None
+        if key in (curses.KEY_UP, ord("w"), ord("k")):
+            row = (row - 1) % 4
+        elif key in (curses.KEY_DOWN, ord("s"), ord("j")):
+            row = (row + 1) % 4
+        elif key in (curses.KEY_LEFT, curses.KEY_RIGHT, ord("a"), ord("d"), ord("h"), ord("l")):
+            step = 1 if key in (curses.KEY_RIGHT, ord("d"), ord("l")) else -1
+            if row == 0:
+                choice["opponent"] = (choice["opponent"] + step) % len(OPPONENTS)
+            elif row == 1:
+                choice["board"] = (choice["board"] + step) % len(BOARDS)
+        elif key in (10, 13, curses.KEY_ENTER, ord(" ")):
+            if row == 3:
+                return None
+            if OPPONENTS[choice["opponent"]][0] == "director" and not has_key:
+                continue
+            return choice
+
+
+def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
+    """One game. Returns 'menu', 'retry' or 'quit'."""
+    layout, params = make_variant(board, seed)
+    kong = make_kong(opponent)
+    game = Game(layout, params, kong, seed=seed)
+    if hasattr(kong, "attach"):
+        kong.attach(game)
+    label = dict(OPPONENTS)[opponent]
+    scorer, best = Scorer(), scores.get(opponent, 0)
+    lay = layout.to_dict()
+    win.nodelay(True)
+    held: dict[str, float] = {}
+    paused, next_tick = False, time.monotonic()
+
+    def hud(banner: str = "") -> dict:
+        plan = kong.display() if hasattr(kong, "display") else ""
+        return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
+                "banner": banner, "popups": scorer.popups}
+
+    while not game.over:
+        now = time.monotonic()
+        while True:
+            key = win.getch()
+            if key == -1:
+                break
+            if key in (ord("q"), ord("Q")):
+                game.over = True
+                break
+            if key in (ord("p"), ord("P")):
+                paused = not paused
+                held.clear()
+            elif key == curses.KEY_RESIZE:
+                pass
+            elif KEYMAP.get(key):
+                held[KEYMAP[key]] = now + HOLD[KEYMAP[key]]
+        if paused:
+            draw_game(win, lay, game.state(), hud(" PAUSED: press P to resume "))
+            time.sleep(0.05)
+            next_tick = time.monotonic()
+            continue
+        if now >= next_tick:
+            h, w = win.getmaxyx()
+            need_h, need_w = needed_size(lay)
+            if h >= need_h and w >= need_w:                    # freeze the game while the window is too small
+                game.step([k for k, until in held.items() if until >= now])
+                scorer.update(game)
+            next_tick += TICK
+            if next_tick < now - 0.25:
+                next_tick = now
+            draw_game(win, lay, game.state(), hud())
+        time.sleep(max(0.0, min(0.01, next_tick - time.monotonic())))
+
+    new_best = scorer.score > best
+    if new_best:
+        scores[opponent] = scorer.score
+        save_scores(scores)
+    summary = f" GAME OVER  score {scorer.score:06d}{'  NEW BEST!' if new_best else ''}  level {game.level} "
+    draw_game(win, lay, game.state(), {**hud(summary), "best": max(best, scorer.score)})
+    put(win, 0, 0, "")
+    centre(win, win.getmaxyx()[0] - 1, "R retry   M menu   Q quit", curses.A_BOLD)
+    win.refresh()
+    win.nodelay(False)
+    while True:
+        key = win.getch()
+        if key in (ord("r"), ord("R")):
+            return "retry"
+        if key in (ord("m"), ord("M")):
+            return "menu"
+        if key in (ord("q"), ord("Q"), 27):
+            return "quit"
+
+
+def run(win, args) -> None:
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+    win.keypad(True)
+    setup_colors()
+    scores, has_key = load_scores(), load_api_key() is not None
+    names = [o[0] for o in OPPONENTS]
+    boards = [b[0] for b in BOARDS]
+    choice = {"opponent": names.index(args.kong) if args.kong else 3, "board": boards.index(args.board)}
+    skip_menu = args.kong is not None
+    while True:
+        if not skip_menu:
+            picked = menu(win, choice, scores, has_key)
+            if picked is None:
+                return
+        skip_menu = False
+        while True:
+            seed = args.seed if args.seed is not None else random.randrange(1_000_000)
+            outcome = play(win, names[choice["opponent"]], boards[choice["board"]], seed, scores)
+            if outcome != "retry":
+                break
+        if outcome == "quit":
+            return
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS], help="skip the menu and play this opponent")
+    parser.add_argument("--board", choices=[b[0] for b in BOARDS], default="random")
+    parser.add_argument("--seed", type=int, default=None, help="same seed = same board")
+    args = parser.parse_args()
+    if args.kong == "director" and load_api_key() is None:
+        raise SystemExit("The AI Director needs an OpenRouter key: see README.md")
+    try:
+        curses.wrapper(lambda win: run(win, args))
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
