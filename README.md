@@ -9,6 +9,10 @@ its tactics**, without ever making the game lag. Pure Python standard library: n
 The article behind it, with published and measured LLM speed and cost data:
 [Using Slow Reasoning LLMs for Fast Games](docs/article/llm-real-time-game-2026-10.md).
 
+<img width="745" height="601" alt="Screenshot from 2026-10-09 19-58-34" src="https://github.com/user-attachments/assets/ae4e31d0-4e99-4b8a-8f29-6bf885888483" />
+
+
+
 ## Quick start
 
 ```bash
