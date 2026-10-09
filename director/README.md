@@ -131,7 +131,7 @@ and leave the live director out of the copy (`copy.deepcopy(game, memo={id(game.
 - **Reasoning:** `reasoning="none" | "low" | "medium" | "high"` is passed as OpenRouter's reasoning
   effort. Medium is a good default for a director that runs every ~20 s. No temperature is sent,
   since some current models reject it.
-- **API key:** from `OPENROUTER_API_KEY`, or from `~/.config/dk-bench/openrouter.env` containing
+- **API key:** from `OPENROUTER_API_KEY`, or from `~/.config/dk-game/openrouter.env` containing
   `OPENROUTER_API_KEY=...` (chmod 600). It is never logged.
 - **Usage:** `client.usage` (per layer) and `client.total_usage()` report calls, retries, failures,
   tokens and cost.

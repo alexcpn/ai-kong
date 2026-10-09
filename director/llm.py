@@ -1,7 +1,8 @@
 """OpenRouter (or any OpenAI-compatible) transport with strict JSON output, validation and retries.
 
 Stdlib only. Never logs the API key. Key lookup order: OPENROUTER_API_KEY, KONG_API_KEY, then
-~/.config/dk-bench/openrouter.env (a KEY=VALUE file; keep it chmod 600).
+~/.config/dk-game/openrouter.env (a KEY=VALUE file; keep it chmod 600; the older
+~/.config/dk-bench/openrouter.env is still read).
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from typing import Callable
 
 DEFAULT_MODEL = "anthropic/claude-haiku-5.5"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-KEY_FILE = os.path.expanduser("~/.config/dk-bench/openrouter.env")
+KEY_FILE = os.path.expanduser("~/.config/dk-game/openrouter.env")
+LEGACY_KEY_FILE = os.path.expanduser("~/.config/dk-bench/openrouter.env")
 
 
 class LLMError(Exception):
@@ -28,14 +30,15 @@ def load_api_key() -> str | None:
     for var in ("OPENROUTER_API_KEY", "KONG_API_KEY"):
         if os.environ.get(var):
             return os.environ[var]
-    try:
-        with open(KEY_FILE, encoding="utf-8") as handle:
-            for line in handle:
-                key, _, value = line.strip().partition("=")
-                if key.strip() in ("OPENROUTER_API_KEY", "KONG_API_KEY") and value.strip():
-                    return value.strip().strip("'\"")
-    except OSError:
-        pass
+    for path in (KEY_FILE, LEGACY_KEY_FILE):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                for line in handle:
+                    key, _, value = line.strip().partition("=")
+                    if key.strip() in ("OPENROUTER_API_KEY", "KONG_API_KEY") and value.strip():
+                        return value.strip().strip("'\"")
+        except OSError:
+            continue
     return None
 
 

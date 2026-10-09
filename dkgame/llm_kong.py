@@ -10,7 +10,7 @@ Output is constrained with strict JSON schemas (routed only to hosts that enforc
 retried once, and on failure replaced by a scripted plan. Every fallback is counted.
 
 Configuration (environment variables, or LLMKong(...) arguments; per layer):
-  OPENROUTER_API_KEY                 required (or ~/.config/dk-bench/openrouter.env, see director/llm.py)
+  OPENROUTER_API_KEY                 required (or ~/.config/dk-game/openrouter.env, see director/llm.py)
   KONG_STRATEGIST_MODEL              default anthropic/claude-haiku-5.5
   KONG_TACTICIAN_MODEL               default anthropic/claude-haiku-5.5
   KONG_STRATEGIST_REASONING          none | low | medium | high   (default medium)

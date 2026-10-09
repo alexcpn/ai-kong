@@ -53,9 +53,9 @@ You have 3 lives, and each level has a time limit: running out costs a life. Eac
 It needs an [OpenRouter](https://openrouter.ai) API key. Create the key file once in your own terminal:
 
 ```bash
-mkdir -p ~/.config/dk-bench
-printf 'OPENROUTER_API_KEY=%s\n' 'sk-or-...' > ~/.config/dk-bench/openrouter.env
-chmod 600 ~/.config/dk-bench/openrouter.env
+mkdir -p ~/.config/dk-game
+printf 'OPENROUTER_API_KEY=%s\n' 'sk-or-...' > ~/.config/dk-game/openrouter.env
+chmod 600 ~/.config/dk-game/openrouter.env
 ```
 
 (or export `OPENROUTER_API_KEY`). The default model is `anthropic/claude-haiku-5.5` with medium
