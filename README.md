@@ -25,14 +25,24 @@ Options: `--kong ai|classic`, `--board random|classic|tall|sparse`,
 
 In a game: arrows (or WASD) move, Space jumps, **T** taunts Kong, P pauses, Q quits.
 
-**Default models:** `anthropic/claude-haiku-5.5` for both of AI Kong's LLM calls: the strategist
-(medium reasoning, every ~20 s and when you lose a life or clear a level) and the voice that answers
-taunts (no reasoning, so it replies in about 2 s). Change them with `KONG_DIRECTOR_MODEL` /
-`KONG_DIRECTOR_REASONING` and `KONG_VOICE_MODEL` (shell or `.config/config.env`).
+**Default models (cheapest):** `anthropic/claude-haiku-5.5` for the strategist (medium reasoning,
+every ~20 s and when you lose a life or clear a level, ~6 s per plan) and for the voice that answers
+taunts (~2 s). About $0.0007 per strategy call and $0.0001 per taunt reply: roughly $0.002-0.003 per
+minute of play, 2-3 cents for a 10-minute session. The running total is shown at the bottom right.
 
-**Cost per session (measured with the defaults):** about $0.0006 per strategy call and $0.0001 per
-taunt reply. With 3-5 strategy calls a minute that's roughly $0.002-0.003 per minute of play, so
-2-3 cents for a 10-minute session. The running total is shown at the bottom right while you play.
+**Fast setup (optional):** each role can use its own model and provider. With the fastest set we
+measured (Oct 2026), and a third role, the tactician, that picks Kong's actual throws at every
+decision:
+
+| Role | When | Model @ provider | Reply time |
+|---|---|---|---|
+| Strategist | every ~20 s, and when you lose a life or clear a level | `openai/gpt-oss-120b` @ Cerebras, medium reasoning | ~2-2.5 s |
+| Tactician | every Kong decision (~2 s) | `openai/gpt-oss-20b` @ Groq, low reasoning | ~0.6-1 s |
+| Voice | when you taunt | `openai/gpt-oss-120b` @ Groq, low reasoning | ~0.4-0.8 s |
+
+It costs about 1-1.5 cents per minute. Switch by uncommenting the fast block in `.config/config.env`
+(settings: `KONG_<ROLE>_MODEL`, `_REASONING`, `_PROVIDER` for `DIRECTOR`, `TACTICIAN`, `VOICE`, and
+`KONG_USE_TACTICIAN=1`). The measurements behind these numbers are in `docs/llm-speed/`.
 
 To configure AI Kong from files instead of the shell, put the key in
 `.config/opneroutere.env` (git-ignored; copy `.config/opneroutere.env.ex`) and settings in
@@ -103,19 +113,19 @@ printf 'OPENROUTER_API_KEY=%s\n' 'sk-or-...' > ~/.config/dk-game/openrouter.env
 chmod 600 ~/.config/dk-game/openrouter.env
 ```
 
-(or export `OPENROUTER_API_KEY`). The default model is `anthropic/claude-haiku-5.5` with medium
-reasoning; that costs roughly $0.002-0.003 per minute of play (see Quick start). To use another
-model:
+(or export `OPENROUTER_API_KEY`). See Quick start for AI Kong's three roles, their default models,
+speeds and costs. To use another model:
 
 ```bash
-KONG_DIRECTOR_MODEL=openai/gpt-oss-120b python3 dk.py --kong ai
+KONG_DIRECTOR_MODEL=anthropic/claude-haiku-5.5 KONG_DIRECTOR_PROVIDER= python3 dk.py --kong ai  # any provider
 KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai       # more deliberate plans
+KONG_USE_TACTICIAN=0 python3 dk.py --kong ai               # strategist + knobs only
 ```
 
 How it stays fair and lag-free:
-- The LLM never moves barrels itself. It sets 8 **knobs** for a deterministic Kong: throw rate,
+- The LLM never moves barrels itself. The strategist sets 8 **knobs** for a deterministic Kong: throw rate,
   speed mix, route mix, burst chance, ladder ambush, rhythm jitter, hold-back lulls and where Kong
-  stands.
+  stands. The tactician only chooses each throw's timing, speed and route, within the engine's limits.
 - Every change is clamped to limits, and changes are rate-limited.
 - A **fairness guard** simulates proposed changes with a near-perfect player and vetoes any that
   would make the game unwinnable.
@@ -125,9 +135,13 @@ How it stays fair and lag-free:
 How the LLM is used: it is far too slow to steer anything moment to moment, so it acts as a
 commander. Every ~20 seconds (and when you lose a life or clear a level) the strategist, with
 reasoning, studies your habits and sets Kong's 8 knobs (throwing tactics and where he stands); the
-engine carries that out every tick. Taunts go to a second,
-fast LLM call with no reasoning, so Kong answers in a second or two. The knob limits and fairness
-guard apply to everything the strategist decides.
+engine carries that out every tick. With a fast inference provider a third role becomes possible:
+the tactician, consulted at every Kong decision (~2 s), turns the plan into the actual throws for
+what you are doing right now. It never makes the game wait: if its reply takes longer than 1.2 s,
+Kong uses his knob-driven throws for that window, and the screen shows how often that happened
+("tactician ... 20% late"). Taunts go to a separate fast call, so Kong answers within a second.
+The knob limits and fairness guard apply to the strategist; the engine's per-level limits (throws
+per decision, gaps, barrels on screen) apply to every throw, whoever chose it.
 
 The screen shows what this costs as you play: the running total at the right of the bottom row, and,
 if your terminal has a spare row (26+ rows; ~90 columns shows it in full), which models play Kong, their average

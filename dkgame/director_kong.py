@@ -4,7 +4,11 @@ ParametricKong is a deterministic Kong whose behaviour is fully set by a handful
 DirectorKong lets an LLM director (director/) turn those knobs from a profile of the player,
 with a fairness guard that vetoes settings even an omniscient player could not survive.
 Plans go through the same {"throws": [...]} interface as every Kong. Player taunts get a separate,
-fast "voice" call (no reasoning) so Kong answers in a second or two and may charge down at once.
+fast "voice" call so Kong answers in a second or two and may charge down at once.
+
+With a fast inference provider, an optional TACTICIAN layer turns the strategist's plan into the
+actual throws at every Kong decision (every couple of seconds). It never blocks the game: if its
+reply is late, Kong falls back to the knob-driven throws for that window, and the miss is counted.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 
 from director import Director, FeasibilityGuard, KnobSet, KnobSpec, Layer, LLMError  # noqa: E402
 
-from .engine import TICK, Kong  # noqa: E402
+from .engine import ROUTES, TICK, Kong  # noqa: E402
 from .llm_kong import MECHANICS  # noqa: E402
 from .lookahead import LookaheadPlayer  # noqa: E402
 
@@ -79,6 +83,28 @@ Reply with JSON: say (<= 60 characters, playful, family-friendly, answering what
 point-blank barrels are deadly, but if the player touches you while you are down you are defeated and
 they clear the level. At anger 100 you charge anyway. Weigh your anger, barrels_left, where the player
 is (far below = long trip, near the top = they can reach you), and whether the taunt is bait or a bluff."""
+
+TACTICIAN_SYSTEM = MECHANICS + """
+
+WHERE KONG IS: Kong roams a few girders ABOVE the player (not always at the top) and each barrel starts
+where he stands, rolling toward the player. kong_x (0 = left end of his girder, 1 = right end) is where
+he walks to next: stand above a ladder the player needs.
+
+YOUR ROLE: TACTICIAN, deciding Kong's next few seconds in real time. Your strategist set the plan and
+the knobs; turn them into concrete throws for the coming window, adapting to where the player is RIGHT
+NOW (climbing a ladder? waiting at a ladder foot? jumping?). Throws: up to rules.max_throws_per_decision,
+each {delay (seconds from now, 0..window_s), speed (allowed by rules.speeds), route}. Zero throws is fine
+when holding back is part of the plan. Respect barrels_left: unspent barrels at level end are wasted,
+but an empty Kong is helpless. Be quick and decisive."""
+
+TACTICIAN_SCHEMA = {"type": "object", "properties": {
+    "throws": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"delay": {"type": "number"}, "speed": {"type": "string", "enum": ["slow", "normal", "fast"]},
+                       "route": {"type": "string", "enum": list(ROUTES)}},
+        "required": ["delay", "speed", "route"], "additionalProperties": False}},
+    "kong_x": {"type": "number"}},
+    "required": ["throws", "kong_x"], "additionalProperties": False}
 
 VOICE_SCHEMA = {"type": "object", "properties": {"say": {"type": "string"}, "charge": {"type": "boolean"}},
                 "required": ["say", "charge"], "additionalProperties": False}
@@ -190,7 +216,8 @@ class DirectorKong(ParametricKong):
     name = "director"
 
     def __init__(self, background: bool = False, guard: bool = True, every_s: float | None = None,
-                 layer: Layer | None = None, client=None, guard_rollouts: int = 3) -> None:
+                 layer: Layer | None = None, client=None, guard_rollouts: int = 3, tactician: bool = False,
+                 tactician_deadline_s: float = 1.2) -> None:
         self.knobset = KnobSet(KNOB_SPECS)
         super().__init__(self.knobset)
         every = every_s or float(os.environ.get("KONG_STRATEGY_EVERY", "20"))
@@ -208,6 +235,14 @@ class DirectorKong(ParametricKong):
         self._voice_pool = cf.ThreadPoolExecutor(max_workers=1)
         self._voice_job: cf.Future | None = None
         self._pending_taunt: str | None = None
+        self.tactician = Layer.from_env("tactician", "low", 1500) if tactician and background else None
+        self._tac_pool = cf.ThreadPoolExecutor(max_workers=1) if self.tactician else None
+        self._tac_job: cf.Future | None = None
+        self._tac_obs: dict | None = None
+        self._tac_deadline = 0.0
+        self._tac_settled = True                  # this window already has its throws (reply or fallback)
+        self.tactics = {"windows": 0, "on_time": 0, "late": 0}
+        self.tactician_deadline_s = tactician_deadline_s
 
     def provoke(self, text: str, t: float) -> None:
         """The player taunted Kong (the game has already raised his anger): answer fast, maybe charge."""
@@ -287,17 +322,73 @@ class DirectorKong(ParametricKong):
             self.director.update(t, context=self.context(obs), outcomes=self.outcomes(obs), snapshot=snapshot,
                                  trigger=reason)
             self._after_apply(t)
-        return self._announce(super().plan(obs))
+        if self.tactician is None:
+            return self._announce(super().plan(obs))
+        return self._announce(self._start_tactics(obs))
+
+    # ------------------------------------------------------------------ tactician
+
+    def _start_tactics(self, obs: dict) -> dict:
+        """A new decision window: ask the tactician; until it answers, throw nothing (it is quick)."""
+        self.tactics["windows"] += 1
+        if self._tac_job is not None and not self._tac_job.done():
+            self._tac_settled = True               # still busy with the last window: knobs this time
+            self.tactics["late"] += 1
+            return super().plan(obs)
+        self._tac_obs, self._tac_deadline, self._tac_settled = obs, obs["t"] + self.tactician_deadline_s, False
+        self._tac_job = self._tac_pool.submit(self.director.client.ask, self.tactician, TACTICIAN_SYSTEM,
+                                              self.tactics_prompt(obs), TACTICIAN_SCHEMA, self._valid_tactics)
+        return self._with_position({"throws": []})
+
+    def tactics_prompt(self, obs: dict) -> dict:
+        g = self.game
+        barrels = [{"floor": b.floor, "x": b.x, "dir": b.direction, "falling": b.falling} for b in g.barrels] \
+            if g is not None else []
+        return {"window_s": obs["interval"], "rules": obs["rules"], "level": obs["level"], "lives": obs["lives"],
+                "time_left": obs["time_left"], "barrels_left": obs.get("barrels_left"),
+                "player": obs["player"], "kong": obs.get("kong"), "barrels_on_board": barrels,
+                "top_floor": obs["top_floor"], "goal_x": obs["goal_x"], "ladders": obs["ladders"],
+                "strategist": {"plan": self.director.strategy, "about_the_player": self.director.opponent_model,
+                               "knobs": self.knobset.snapshot()},
+                "recent_barrels": obs["barrel_outcomes"][-5:]}
+
+    @staticmethod
+    def _valid_tactics(reply):
+        if not isinstance(reply, dict) or not isinstance(reply.get("throws"), list) \
+                or not isinstance(reply.get("kong_x"), (int, float)):
+            raise LLMError("bad tactician reply")
+        throws = [t for t in reply["throws"] if isinstance(t, dict)]
+        return {"throws": throws, "kong_x": min(1.0, max(0.0, float(reply["kong_x"])))}
+
+    def _tactics_ready(self) -> dict | None:
+        if self._tac_settled or self._tac_job is None:
+            return None
+        if self._tac_job.done():
+            try:
+                reply = self._tac_job.result()
+            except Exception:      # LLMError or network trouble: use the knobs for this window
+                reply = None
+            self._tac_settled = True
+            if reply is None:
+                self.tactics["late"] += 1
+                return super().plan(self._tac_obs)
+            self.tactics["on_time"] += 1
+            return {"throws": reply["throws"], "move_to": reply["kong_x"]}
+        if self.game is not None and self.game.t > self._tac_deadline:
+            self._tac_settled = True               # too slow for this window: knobs it is
+            self.tactics["late"] += 1
+            return super().plan(self._tac_obs)
+        return None
 
     def ready_plan(self):
-        """Background mode: apply new knobs (and show the new strategy) as soon as they arrive."""
+        """Background mode: taunt replies, new knobs and tactician throws are applied as they arrive."""
         voice = self._voice_reply()
         if voice:
             return voice
-        if not self.background or not self.director.poll():
-            return None
-        self._after_apply(self.game.t if self.game is not None else 0.0)
-        return self._announce({"throws": []})
+        if self.background and self.director.poll():
+            self._after_apply(self.game.t if self.game is not None else 0.0)
+            return self._announce({"throws": []})
+        return self._tactics_ready()
 
     def context(self, obs: dict) -> dict:
         return {
@@ -321,24 +412,28 @@ class DirectorKong(ParametricKong):
     def usage(self) -> dict:
         return self.director.client.total_usage()
 
-    def models(self) -> str:
-        """Which models play Kong, e.g. "strategist claude-haiku-5.5 (medium) · voice claude-haiku-5.5"."""
-        brain, voice = self.director.layer, self.voice
-        short = lambda m: m.split("/")[-1]  # noqa: E731
-        reasoning = f" ({brain.reasoning})" if brain.reasoning in ("low", "medium", "high") else ""
-        return f"strategist {short(brain.model)}{reasoning} · voice {short(voice.model)}"
+    def roles(self) -> list[tuple[str, Layer]]:
+        out = [("strategist", self.director.layer)]
+        if self.tactician is not None:
+            out.append(("tactician", self.tactician))
+        return out + [("voice", self.voice)]
 
     def llm_status(self) -> tuple[str, str]:
-        """(models with average reply times and call count, running cost) for the screen."""
+        """(each role's model@provider with its average reply time, running cost) for the screen,
+        e.g. "strategist gpt-oss-120b@cerebras 2.1s · tactician @groq 0.5s 3% late · voice @groq 0.4s"."""
         per_layer = getattr(self.director.client, "usage", {})
-        parts = []
-        for layer in (self.director.layer, self.voice):
+        parts, last_model = [], None
+        for role, layer in self.roles():
             u = per_layer.get(layer.name) if isinstance(per_layer, dict) else None
-            wait = f", {u['seconds'] / u['calls']:.1f}s" if u and u["calls"] else ""
-            reasoning = f"{layer.reasoning}" if layer.reasoning in ("low", "medium", "high") else ""
-            extra = ", ".join(x for x in (reasoning, wait.lstrip(", ")) if x)
-            role = "strategist" if layer is self.director.layer else "voice"
-            parts.append(f"{role} {layer.model.split('/')[-1]}" + (f" ({extra})" if extra else ""))
+            model = layer.model.split("/")[-1]
+            where = ("" if model == last_model else model) + (f"@{layer.provider}" if layer.provider else "")
+            last_model = model
+            text = f"{role} {where or model}"
+            if u and u["calls"]:
+                text += f" {u['seconds'] / u['calls']:.1f}s"
+            if role == "tactician" and self.tactics["windows"]:
+                text += f" {round(100 * self.tactics['late'] / self.tactics['windows'])}% late"
+            parts.append(text)
         total = self.usage()
         return " · ".join(parts) + f" · {total.get('calls', 0)} calls", f"${total.get('cost_usd', 0.0):.4f}"
 

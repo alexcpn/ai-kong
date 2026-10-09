@@ -124,7 +124,8 @@ def make_kong(name: str):
     if name == "ai":
         from director import Layer
         from dkgame.director_kong import DirectorKong
-        return DirectorKong(background=True, layer=Layer.from_env("director", "medium", 8000))
+        return DirectorKong(background=True, layer=Layer.from_env("director", "medium", 8000),
+                            tactician=os.environ.get("KONG_USE_TACTICIAN", "0") not in ("0", "off", "no"))
     return SCRIPTED[name]()
 
 
@@ -184,10 +185,17 @@ def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
 
 
 def ai_models() -> str:
-    """The models AI Kong will use (from the environment / .config/config.env)."""
+    """The models AI Kong will use (from the environment / .config/config.env), for the menu."""
     from director import Layer
-    brain, voice = Layer.from_env("director", "medium", 8000), Layer.from_env("voice", "none", 300)
-    return f"{brain.model.split('/')[-1]} ({brain.reasoning}) + {voice.model.split('/')[-1]} for taunts"
+    roles = [("plan", Layer.from_env("director", "medium", 8000))]
+    if os.environ.get("KONG_USE_TACTICIAN", "0") not in ("0", "off", "no"):
+        roles.append(("throws", Layer.from_env("tactician", "low", 1500)))
+    roles.append(("taunts", Layer.from_env("voice", "none", 300)))
+    models = {layer.model.split("/")[-1] for _, layer in roles}
+    where = lambda layer: f"@{layer.provider}" if layer.provider else ""  # noqa: E731
+    if len(models) == 1:                                  # e.g. "gpt-oss-120b: plan@cerebras · throws@groq ..."
+        return f"{models.pop()}: " + " · ".join(f"{role}{where(layer)}" for role, layer in roles)
+    return " · ".join(f"{role} {layer.model.split('/')[-1]}{where(layer)}" for role, layer in roles)
 
 
 def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
@@ -329,6 +337,16 @@ def run(win, args) -> None:
             return
 
 
+# The game's AI Kong defaults: the cheapest setup (~$0.002-0.003 per minute), Claude Haiku 5.5 for the
+# strategist and the voice, no tactician. The fast setup (gpt-oss on Cerebras/Groq, with the tactician,
+# ~1-1.5 cents a minute) is in .config/config.env, commented. The shell or that file override these.
+LLM_DEFAULTS = {
+    "KONG_USE_TACTICIAN": "0",
+    "KONG_DIRECTOR_MODEL": "anthropic/claude-haiku-5.5", "KONG_DIRECTOR_REASONING": "medium",
+    "KONG_TACTICIAN_MODEL": "openai/gpt-oss-20b", "KONG_TACTICIAN_REASONING": "low", "KONG_TACTICIAN_PROVIDER": "groq",
+    "KONG_VOICE_MODEL": "anthropic/claude-haiku-5.5", "KONG_VOICE_REASONING": "none",
+}
+
 ENV_FILES = [os.path.join(HERE, ".config", "config.env"),          # model / reasoning / endpoint settings
              os.path.join(HERE, ".config", "opneroutere.env")]     # API key (git-ignored)
 
@@ -349,6 +367,8 @@ def load_env_files() -> None:
 
 def main() -> None:
     load_env_files()
+    for name, value in LLM_DEFAULTS.items():
+        os.environ.setdefault(name, value)
     os.environ.setdefault("ESCDELAY", "25")      # curses waits 1 s after ESC by default
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS] + ["director"],

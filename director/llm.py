@@ -50,6 +50,7 @@ class Layer:
     reasoning: str = "medium"      # none | low | medium | high
     json_mode: str = "schema"      # schema (strict structured outputs) | object (plain JSON mode)
     max_tokens: int = 8000
+    provider: str | None = None    # pin one OpenRouter provider for this layer (else the client's)
 
     @classmethod
     def from_env(cls, name: str, default_reasoning: str, max_tokens: int, prefix: str = "KONG",
@@ -59,7 +60,8 @@ class Layer:
                    model=override.get("model") or os.environ.get(env + "MODEL", DEFAULT_MODEL),
                    reasoning=override.get("reasoning") or os.environ.get(env + "REASONING", default_reasoning),
                    json_mode=override.get("json_mode") or os.environ.get(env + "JSON", "schema"),
-                   max_tokens=max_tokens)
+                   max_tokens=max_tokens,
+                   provider=override.get("provider") or os.environ.get(env + "PROVIDER") or None)
 
 
 class LLMClient:
@@ -120,8 +122,9 @@ class LLMClient:
             body["messages"][0]["content"] += "\n\nReply with ONLY a JSON object matching: " + json.dumps(schema)
         if layer.reasoning in ("low", "medium", "high"):
             body["reasoning"] = {"effort": layer.reasoning, "exclude": True}
-        if self.provider:
-            body.setdefault("provider", {})["order"] = [self.provider]
+        provider = layer.provider or self.provider
+        if provider:
+            body.setdefault("provider", {})["order"] = [provider]
             body["provider"]["allow_fallbacks"] = False
         request = urllib.request.Request(
             self.base_url + "/chat/completions", data=json.dumps(body).encode(), method="POST",

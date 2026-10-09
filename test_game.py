@@ -355,5 +355,69 @@ class CollisionTests(unittest.TestCase):
         self.assertEqual(slips, 0)
 
 
+class TacticianTests(unittest.TestCase):
+    def make(self, tactics_delay=0.0, fail=False):
+        import time
+        from dkgame.director_kong import DEFAULT_KNOBS, DirectorKong
+
+        calls = []
+
+        class Stub:
+            usage = {}
+
+            def ask(self, layer, system, prompt, schema, validate):
+                calls.append((layer.name, layer.provider, prompt))
+                if layer.name == "tactician":
+                    time.sleep(tactics_delay)
+                    if fail:
+                        raise RuntimeError("provider down")
+                    return validate({"throws": [{"delay": 0.0, "speed": "slow", "route": "always"}], "kong_x": 0.9})
+                return validate({"opponent_model": "", "strategy": "s", "reasons": "", "taunt": "",
+                                 "knobs": dict(DEFAULT_KNOBS)})
+
+            def total_usage(self):
+                return {"calls": len(calls), "cost_usd": 0.0}
+
+        layout, params = dk.make_variant("classic", 4)
+        kong = DirectorKong(background=True, client=Stub(), guard=False, tactician=True)
+        kong.tactician.provider = "groq"
+        game = Game(layout, params, kong, seed=4)
+        kong.attach(game)
+        game.player.invuln_until = 1e9
+        return game, kong, calls
+
+    def run_for(self, game, seconds):
+        import time
+        for _ in range(int(seconds / 0.05)):
+            game.step(())
+            time.sleep(0.003)
+
+    def test_fast_tactician_decides_the_throws_and_where_kong_stands(self):
+        game, kong, calls = self.make()
+        self.run_for(game, 6)
+        tactics = [c for c in calls if c[0] == "tactician"]
+        self.assertGreaterEqual(len(tactics), 2)
+        self.assertEqual(tactics[0][1], "groq")                          # per-layer provider reaches the client
+        prompt = tactics[-1][2]
+        self.assertIn("strategist", prompt)
+        self.assertIn("barrels_on_board", prompt)
+        self.assertGreater(kong.tactics["on_time"], 0)
+        self.assertEqual(game.kong_aim, 0.9)
+        self.assertTrue(any(e.get("route") == "always" for e in game.events if e["event"] == "throw"))
+
+    def test_slow_or_failing_tactician_falls_back_to_the_knobs(self):
+        for kw in ({"tactics_delay": 2.5}, {"fail": True}):
+            game, kong, _ = self.make(**kw)
+            self.run_for(game, 7)
+            self.assertGreater(kong.tactics["late"], 0, kw)
+            self.assertTrue(any(e["event"] == "throw" for e in game.events), kw)  # Kong never goes quiet
+            self.assertIn("late", kong.llm_status()[0])
+
+    def test_tactician_is_off_unless_asked(self):
+        from dkgame.director_kong import DirectorKong
+        self.assertIsNone(DirectorKong(background=True, client=object(), guard=False).tactician)
+        self.assertIsNone(DirectorKong(background=False, client=object(), guard=False, tactician=True).tactician)
+
+
 if __name__ == "__main__":
     unittest.main()
