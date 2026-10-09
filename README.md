@@ -31,12 +31,13 @@ KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai --board tall
 Options: `--kong ai|classic`, `--board random|classic|tall|sparse`,
 `--seed N`. Without `--kong` you get the menu.
 
-In a game: arrows (or WASD) move, Space jumps, **T** taunts Kong, P pauses, Q quits.
+In a game: arrows (or WASD) move, Space jumps, P pauses, Q quits.
 
 **Default models (cheapest):** `anthropic/claude-haiku-5.5` for the strategist (medium reasoning,
-every ~20 s and when you lose a life or clear a level, ~6 s per plan) and for the voice that answers
-taunts (~2 s). About $0.0007 per strategy call and $0.0001 per taunt reply: roughly $0.002-0.003 per
-minute of play, 2-3 cents for a 10-minute session. The running total is shown at the bottom right.
+every ~20 s and when you lose a life or clear a level, ~6 s per plan) and for the voice that writes
+the characters' lines (every ~30 s and after each new plan; ~14 s, but written ahead so nobody waits).
+About $0.0007 per strategy call and $0.0013 per set of lines: roughly $0.005-0.008 per minute of play,
+5-8 cents for a 10-minute session. The running total is shown at the bottom right.
 
 **Fast setup (optional):** each role can use its own model and provider. With the fastest set we
 measured (Oct 2026), and a third role, the tactician, that picks Kong's actual throws at every
@@ -46,7 +47,7 @@ decision:
 |---|---|---|---|
 | Strategist | every ~20 s, and when you lose a life or clear a level | `openai/gpt-oss-120b` @ Cerebras, medium reasoning | ~2-2.5 s |
 | Tactician | every Kong decision (~2 s) | `openai/gpt-oss-20b` @ Groq, low reasoning | ~0.6-1 s |
-| Voice | when you taunt | `openai/gpt-oss-120b` @ Groq, low reasoning | ~0.4-0.8 s |
+| Voice | writes the characters' lines, every ~30 s | `openai/gpt-oss-120b` @ Groq, low reasoning | a few seconds, written ahead |
 
 It costs about 1-1.5 cents per minute. Switch by uncommenting the fast block in `.config/config.env`
 (settings: `KONG_<ROLE>_MODEL`, `_REASONING`, `_PROVIDER` for `DIRECTOR`, `TACTICIAN`, `VOICE`, and
@@ -67,7 +68,6 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 | ← → / A D / H L | walk (you can steer in the air) |
 | ↑ ↓ / W S / K J | climb up / down a ladder (step off mid-ladder to drop) |
 | Space / Enter | jump (hold for a little extra height) |
-| T | taunt Kong: ←→ pick a line, Enter sends, Esc cancels (once every 4 s) |
 | P | pause |
 | Q | end the game |
 
@@ -75,7 +75,7 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 
 | Kong | Style |
 |---|---|
-| **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds, after every life you lose, and when you taunt him. Its current plan is shown under the board |
+| **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds, and after every life you lose. Its current plan is shown under the board |
 | Classic (no LLM) | Arcade rhythm: one barrel at a time, random routes. For testing without a key or network |
 
 **Kong moves and his barrels are limited**: he comes down from the top and roams about three girders
@@ -84,15 +84,19 @@ picks the spot, e.g. above a ladder you need). Catch him anywhere but the top gi
 He has 45 barrels on level 1, 8 more each level, shown as `●×45` at the top; they refill on a new
 level, not when you lose a life.
 
-**Taunts and Kong's temper**: press T and pick a line ("Bet you can't hit me on a ladder.", "I'm
-taking the left ladder." ...). Each taunt fills Kong's ANGER meter (it cools while he sits at the top),
-and he grunts at once. AI Kong then answers in his own words within a second or two, using a small,
-fast LLM call (no reasoning; set `KONG_VOICE_MODEL` to change it), and may **take the bait**. At full
-anger (three quick taunts) he loses his temper either way.
+**Kong, Pauline and you talk.** Kong mocks you, Pauline cheers you on (and sometimes hints at Kong's
+plan: "He's eyeing the left ladder!"), and your own character reacts ("Whoa, that was close!"). With AI
+Kong the lines are written by an LLM a few times a minute, fitted to how you play and to Kong's current
+plan, and the game picks one the instant something happens, so nobody waits for the network. Classic
+Kong uses built-in lines.
+
+**Kong's temper**: doing well makes Kong angry. Jumping his barrels, reaching a higher girder and
+getting to the top girder fill his ANGER meter (it cools over time). At full anger he loses his temper.
 
 An angry Kong storms down to your girder, throwing barrels on the way and from a few columns away
 (these come out of his supply). **Touch him and Kong is beaten**: +3000 and the level is cleared.
-After a few seconds on your girder he climbs back up, and you can still catch him on the way. Classic Kong has a temper too (grunts only, no LLM).
+After a few seconds on your girder he climbs back up, and you can still catch him on the way. Classic Kong
+has a temper too.
 
 Boards: **Random** (a new layout each game), **Classic**, **Tall** (6 girders), **Sparse** (a
 single ladder between girders). Use `--seed N` to replay the same board.
@@ -147,7 +151,8 @@ engine carries that out every tick. With a fast inference provider a third role 
 the tactician, consulted at every Kong decision (~2 s), turns the plan into the actual throws for
 what you are doing right now. It never makes the game wait: if its reply takes longer than 1.2 s,
 Kong uses his knob-driven throws for that window, and the screen shows how often that happened
-("tactician ... 20% late"). Taunts go to a separate fast call, so Kong answers within a second.
+("tactician ... 20% late"). A separate call writes the characters' lines ahead of time, so speech
+never waits on the network either.
 The knob limits and fairness guard apply to the strategist; the engine's per-level limits (throws
 per decision, gaps, barrels on screen) apply to every throw, whoever chose it.
 

@@ -44,6 +44,10 @@ class Params:
     barrel_budget: int | None = None  # barrels Kong may throw per level (None = unlimited)
     barrel_budget_per_level: int = 0  # extra barrels for each level after the first
     anger_decay: float = 2.0          # anger (0-100) Kong loses per second while at the top
+    anger_from_play: bool = False     # the player's successes anger Kong (jumps, climbs, reaching the top)
+    anger_per_jump: float = 15.0
+    anger_per_climb: float = 10.0
+    anger_near_goal: float = 25.0
     rampage_seconds: float = 9.0      # time an enraged Kong spends on the player's girder before going home
     rampage_max_seconds: float = 25.0  # cap on the whole trip down
     kong_walk_gap: float = 0.08       # seconds per column while Kong is down (the player walks at 0.075)
@@ -148,6 +152,7 @@ class Barrel:
     fall_floor: int = 0
     fall_direction: int = 1
     passed_player: bool = False
+    near_missed: bool = False
     thrown_at: float = 0.0
     speed_name: str = "normal"
 
@@ -476,7 +481,7 @@ class Game:
     # ----------------------------------------------------------------- Kong's temper
 
     def provoke(self, amount: float, charge: bool = False) -> None:
-        """The player taunted Kong. At full anger (or if he takes the bait) he comes down after them."""
+        """Raise Kong's anger. At full anger (or when charge is set) he comes down after the player."""
         k = self.kong_body
         self.anger = min(100.0, self.anger + amount)
         self._event("provoked", anger=round(self.anger))
@@ -484,10 +489,12 @@ class Game:
             k.mode, k.until, k.step_at, k.next_throw = "rampage", self.t + self.params.rampage_max_seconds, self.t, self.t + 0.8
             k.arrived = False
             self.anger = 100.0
-            self.taunt = "RAAAARGH!!"
             self._event("kong_rampage")
-        elif amount > 0 and k.mode == "perch":
-            self.taunt = "GRRRR!" if self.anger >= 50 else "Hmph."
+
+    def _rile(self, amount: float) -> None:
+        """The player did well: Kong gets angrier (only when the game turns anger_from_play on)."""
+        if self.params.anger_from_play and self.kong_body.mode == "perch":
+            self.provoke(amount)
 
     def kong_range(self, floor: int) -> tuple[int, int]:
         """Where Kong may stand on a girder (on the top one, not within a few columns of Pauline)."""
@@ -660,6 +667,11 @@ class Game:
             self.highest = p.floor
             self.stats["climbs"] += 1
             self._event("climbed", floor=p.floor, x=p.x)
+            if p.floor == self.layout.top:
+                self._event("near_goal", x=p.x)
+                self._rile(self.params.anger_near_goal)
+            else:
+                self._rile(self.params.anger_per_climb)
 
     def _jump(self) -> None:
         p = self.player
@@ -785,7 +797,7 @@ class Game:
         p, prm = self.player, self.params
         k = self.kong_body
         off_top = k.mode != "perch" or k.floor != self.layout.top or k.climb_to is not None
-        if off_top and abs(k.x - p.x) <= 1 and k.y - 1.0 - 1e-9 <= p.y <= k.y + 0.5:
+        if off_top and -1 <= p.x - k.x <= 2 and k.y - 2.0 - 1e-9 <= p.y <= k.y + 0.5:   # his 4x3 sprite
             self.stats["kong_defeats"] += 1              # caught him away from his top girder
             self._event("kong_defeated", floor=k.floor, x=k.x)
             self._kong_beaten = True
@@ -804,6 +816,7 @@ class Game:
                 self.stats["jumped_over"] += 1
                 self._outcome(b.id, f"jumped over on floor {p.floor} at x={p.x}")
                 self._event("jumped_over", id=b.id)
+                self._rile(prm.anger_per_jump)
         if self.t < p.invuln_until:
             return
         for b in self.barrels:
@@ -821,6 +834,11 @@ class Game:
                 return
             self._hit("fireball")
             return
+        for b in self.barrels:                           # close shave: it passed within 2 and rolls away
+            if not b.near_missed and not b.passed_player and not b.falling and b.floor == p.floor \
+                    and 0 < (b.x - p.x) * b.direction <= 2 and abs(b.y - p.y) < 1.5:
+                b.near_missed = True
+                self._event("near_miss", id=b.id, x=b.x)
 
     def _hit(self, cause: str) -> None:
         p = self.player

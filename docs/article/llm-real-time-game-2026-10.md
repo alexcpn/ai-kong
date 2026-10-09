@@ -30,7 +30,7 @@ The LLM never touches the frame loop. Each role runs in a background thread, the
 
 - **Strategist.** Studies a compact player profile (where they wait, how early they jump, which ladders they use, how they died) and the results of its own earlier plans. It sets 8 typed knobs: throw rate, speed mix, route mix, burst chance, ladder ambush, rhythm jitter, hold-back lulls and where Kong stands. Every change is clamped, rate-limited, and simulated against a near-perfect player before it applies.
 - **Tactician.** Possible only with sub-second inference. At each Kong decision it reads the live board and the strategist's plan and picks the actual throws. If it misses a 1.2 s deadline, Kong uses the knob-driven throws for that window.
-- **Voice.** Answers the player's taunts in character and may decide Kong takes the bait. A local grunt answers instantly, so the player never waits on the network.
+- **Voice.** Writes the lines that Kong, Pauline and the player's character say, a few times a minute, fitted to how the player plays; Pauline sometimes hints at Kong's real plan. The game picks a line the instant something happens (a near miss, a jump, a lost life), so speech never waits on the network.
 
 With a slow model (Haiku, 2 to 6 s) only the strategist and the voice are usable. With the fastest providers today the tactician becomes practical.
 

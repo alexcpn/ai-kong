@@ -7,8 +7,8 @@
 
 Opponents: ai (AI Kong, an LLM that profiles how you play and re-plans Kong's tactics; needs an
 OpenRouter key, see README.md) and classic (scripted, no LLM: for testing without a key).
-Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), T taunts Kong,
-P pauses, Q quits.
+Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), P pauses, Q quits.
+Kong, Pauline and your character talk as you play (AI Kong: lines written by an LLM).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ sys.path.insert(0, HERE)
 
 from director import load_api_key  # noqa: E402
 from dkgame.engine import CLASSIC_LAYOUT, TICK, Game, Params, generate_layout  # noqa: E402
+from dkgame.cast import Cast  # noqa: E402
 from dkgame.kongs import SCRIPTED  # noqa: E402
 from dkgame.render import centre, draw_game, needed_size, put, setup_colors  # noqa: E402
 
@@ -37,11 +38,7 @@ KEYMAP = {curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right", curses.KEY_UP: "up
           ord("h"): "left", ord("l"): "right", ord("k"): "up", ord("j"): "down",
           ord(" "): "jump", ord("\n"): "jump"}
 HOLD = {"left": 0.11, "right": 0.11, "up": 0.16, "down": 0.16, "jump": 0.2}   # no key-up events in terminals
-TAUNTS = ["Is that all you've got?", "You throw like my grandma!", "Too slow, old ape!",
-          "Bet you can't hit me on a ladder.", "I'm taking the left ladder.", "I'm taking the right ladder.",
-          "You'll run out of barrels!", "Pauline's leaving with me!"]
-TAUNT_COOLDOWN = 4.0    # game seconds between taunts (each is one small, fast LLM call for AI Kong)
-TAUNT_ANGER = 40        # three quick taunts and Kong loses his temper
+SPEECH_SECONDS = 2.5    # how long a spoken line stays on screen
 POINTS = {"climb": 100, "jump": 100, "stomp": 200, "level": 1000, "time": 10, "kong": 3000}
 
 
@@ -111,6 +108,7 @@ def make_variant(board: str, seed: int):
     # Difficulty levers: throw_gap_scale / extra_barrels / kong_interval (pace), kong_floors_above
     # (reaction time: barrels from further up take longer to arrive), invuln_time.
     params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0, barrel_budget=45, barrel_budget_per_level=8,
+                    anger_from_play=True,
                     kong_interval=2.0, throw_gap_scale=0.6, extra_barrels=2, kong_moves=True, kong_floors_above=3,
                     invuln_time=3.0)
     if board == "classic":
@@ -190,12 +188,22 @@ def ai_models() -> str:
     roles = [("plan", Layer.from_env("director", "medium", 8000))]
     if os.environ.get("KONG_USE_TACTICIAN", "0") not in ("0", "off", "no"):
         roles.append(("throws", Layer.from_env("tactician", "low", 1500)))
-    roles.append(("taunts", Layer.from_env("voice", "none", 300)))
+    roles.append(("lines", Layer.from_env("voice", "none", 2500)))
     models = {layer.model.split("/")[-1] for _, layer in roles}
     where = lambda layer: f"@{layer.provider}" if layer.provider else ""  # noqa: E731
     if len(models) == 1:                                  # e.g. "gpt-oss-120b: plan@cerebras · throws@groq ..."
         return f"{models.pop()}: " + " · ".join(f"{role}{where(layer)}" for role, layer in roles)
     return " · ".join(f"{role} {layer.model.split('/')[-1]}{where(layer)}" for role, layer in roles)
+
+
+def new_events(events: list, last) -> list:
+    """Engine events after `last` (the engine trims its list, so find our place by identity)."""
+    if last is None:
+        return list(events)
+    for i in range(len(events) - 1, -1, -1):
+        if events[i] is last:
+            return events[i + 1:]
+    return events[-5:]
 
 
 def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
@@ -211,22 +219,22 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
     win.nodelay(True)
     held: dict[str, float] = {}
     paused, next_tick = False, time.monotonic()
-    taunt = {"open": False, "pick": 0, "next": 0.0, "said": "", "until": 0.0}
+    cast = Cast(seed=seed)
+    if hasattr(kong, "cast"):
+        kong.cast = cast                                   # AI Kong rewrites the lines as the game goes
+    speech = {"speaker": "", "text": "", "until": 0.0, "last": None}
 
     def hud(banner: str = "") -> dict:
         plan = kong.display() if hasattr(kong, "display") else ""
-        said = taunt["said"] if game.t < taunt["until"] else ""
+        said = (speech["speaker"], speech["text"]) if game.t < speech["until"] else None
         mode = game.kong_body.mode
-        if taunt["open"]:
-            footer = f"TAUNT ←{TAUNTS[taunt['pick']]:^35}→ ENTER/ESC"
-        elif mode == "rampage":
+        if mode == "rampage":
             footer = "KONG IS COMING FOR YOU!  Touch him to beat the level"
         elif mode == "return":
             footer = "Kong is climbing back up... catch him!"
         else:
-            wait = taunt["next"] - game.t
             bar = "█" * int(game.anger / 10) + "░" * (10 - int(game.anger / 10))
-            footer = f"ANGER {bar}   " + ("T taunt Kong" if wait <= 0 else f"taunt in {int(wait) + 1}s")
+            footer = f"ANGER {bar}"
         llm, cost = kong.llm_status() if hasattr(kong, "llm_status") else ("", "")
         return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
                 "banner": banner, "popups": scorer.popups, "said": said, "footer": footer,
@@ -238,39 +246,16 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             key = win.getch()
             if key == -1:
                 break
-            if taunt["open"]:                                   # picker: the game is paused
-                if key in (curses.KEY_LEFT, curses.KEY_UP, ord("a"), ord("w"), ord("h"), ord("k")):
-                    taunt["pick"] = (taunt["pick"] - 1) % len(TAUNTS)
-                elif key in (curses.KEY_RIGHT, curses.KEY_DOWN, ord("d"), ord("s"), ord("l"), ord("j")):
-                    taunt["pick"] = (taunt["pick"] + 1) % len(TAUNTS)
-                elif key in (10, 13, curses.KEY_ENTER, ord(" "), ord("t"), ord("T")):
-                    text = TAUNTS[taunt["pick"]]
-                    game.provoke(TAUNT_ANGER)                   # instant: anger, a grunt, maybe a rampage
-                    if hasattr(kong, "provoke"):
-                        kong.provoke(text, game.t)              # AI Kong answers properly a moment later
-                    taunt.update(open=False, said=text, until=game.t + 1.2, next=game.t + TAUNT_COOLDOWN)
-                elif key in (27, curses.KEY_BACKSPACE, 127, ord("q"), ord("Q")):
-                    taunt["open"] = False
-                next_tick = time.monotonic()
-                continue
             if key in (ord("q"), ord("Q")):
                 game.over = True
                 break
-            if key in (ord("t"), ord("T")) and game.t >= taunt["next"] and game.kong_body.mode == "perch":
-                taunt["open"] = True
-                held.clear()
-            elif key in (ord("p"), ord("P")):
+            if key in (ord("p"), ord("P")):
                 paused = not paused
                 held.clear()
             elif key == curses.KEY_RESIZE:
                 pass
             elif KEYMAP.get(key):
                 held[KEYMAP[key]] = now + HOLD[KEYMAP[key]]
-        if taunt["open"]:
-            draw_game(win, lay, game.state(), hud())
-            time.sleep(0.02)
-            next_tick = time.monotonic()
-            continue
         if paused:
             draw_game(win, lay, game.state(), hud(" PAUSED: press P to resume "))
             time.sleep(0.05)
@@ -282,6 +267,11 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             if h >= need_h and w >= need_w:                    # freeze the game while the window is too small
                 game.step([k for k, until in held.items() if until >= now])
                 scorer.update(game)
+                fresh = new_events(game.events, speech["last"])
+                speech["last"] = game.events[-1] if game.events else None
+                said = cast.react(fresh, game.t)
+                if said:
+                    speech.update(speaker=said[0], text=said[1], until=game.t + SPEECH_SECONDS)
             next_tick += TICK
             if next_tick < now - 0.25:
                 next_tick = now

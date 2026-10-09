@@ -1,4 +1,4 @@
-"""Time the game's taunt-reply and tactician requests on local Ollama models (OpenAI-compatible API).
+"""Time the game's lines (speech) and tactician requests on local Ollama models (OpenAI-compatible API).
 
     python3 docs/llm-speed/bench_local_ollama.py . llama3.2:latest gemma:latest ...
 """
@@ -8,7 +8,8 @@ os.environ.pop("KONG_PROVIDER", None)
 import dk
 from director import Layer, LLMClient
 from dkgame.engine import Game
-from dkgame.director_kong import (TACTICIAN_SCHEMA, TACTICIAN_SYSTEM, VOICE_SCHEMA, VOICE_SYSTEM, DirectorKong)
+from dkgame.cast import lines_schema
+from dkgame.director_kong import CAST_SYSTEM, TACTICIAN_SCHEMA, TACTICIAN_SYSTEM, DirectorKong
 from dkgame.lookahead import greedy
 
 lay, prm = dk.make_variant("random", 5)
@@ -17,14 +18,13 @@ kong = DirectorKong(background=True, client=object(), guard=False); kong.game = 
 for _ in range(200):
     g.step(greedy(g))
 tactics = kong.tactics_prompt(g.kong_observation())
-taunt = {"player_says": "Bet you can't hit me on a ladder.", "your_anger": 80, "barrels_left": 30,
-         "player": {"floor": 2, "x": 20, "mode": "ground"}, "top_floor": 4, "lives": 2}
+lines = kong.cast_prompt()
 client = LLMClient(api_key="ollama", base_url="http://localhost:11434/v1", timeout=180)
 for model in sys.argv[2:]:
-    for task, system, prompt, schema, check in (("taunt", VOICE_SYSTEM, taunt, VOICE_SCHEMA, DirectorKong._valid_voice),
+    for task, system, prompt, schema, check in (("lines", CAST_SYSTEM, lines, lines_schema(), DirectorKong._valid_lines),
                                                  ("tactician", TACTICIAN_SYSTEM, tactics, TACTICIAN_SCHEMA, DirectorKong._valid_tactics)):
         for mode in ("schema", "object"):
-            layer = Layer(name=f"{model}-{task}", model=model, reasoning="off", json_mode=mode, max_tokens=400)
+            layer = Layer(name=f"{model}-{task}", model=model, reasoning="off", json_mode=mode, max_tokens=2500 if task == "lines" else 400)
             times, errors, sample = [], 0, None
             for i in range(6):                         # call 0 includes loading the model
                 t = time.monotonic()

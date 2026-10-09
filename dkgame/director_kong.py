@@ -3,8 +3,8 @@
 ParametricKong is a deterministic Kong whose behaviour is fully set by a handful of knobs.
 DirectorKong lets an LLM director (director/) turn those knobs from a profile of the player,
 with a fairness guard that vetoes settings even an omniscient player could not survive.
-Plans go through the same {"throws": [...]} interface as every Kong. Player taunts get a separate,
-fast "voice" call so Kong answers in a second or two and may charge down at once.
+Plans go through the same {"throws": [...]} interface as every Kong. A separate "voice" call writes
+the characters' spoken lines ahead of time (see cast.py); the game picks them instantly.
 
 With a fast inference provider, an optional TACTICIAN layer turns the strategist's plan into the
 actual throws at every Kong decision (every couple of seconds). It never blocks the game: if its
@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 
 from director import Director, FeasibilityGuard, KnobSet, KnobSpec, Layer, LLMError  # noqa: E402
 
+from .cast import lines_schema  # noqa: E402
 from .engine import ROUTES, TICK, Kong  # noqa: E402
 from .llm_kong import MECHANICS  # noqa: E402
 from .lookahead import LookaheadPlayer  # noqa: E402
@@ -66,23 +67,13 @@ level ends are WASTED, and a level usually lasts 30-60 s: a passive Kong loses. 
 pressure (throw_rate 0.5+), spend extra in bursts and ambushes where the player is weakest (ladders
 they favour, the climb to the goal), and plan to be nearly empty as they reach the top.
 
-TEMPER. The player can taunt you (situation.player_taunts, newest last); each taunt raises
-situation.kong.anger (0-100, it cools over time). At 100, or when you take the bait, Kong storms down
-to the player's girder for a few seconds and throws point-blank barrels (from your supply) at them.
+TEMPER. The player's successes (jumping your barrels, reaching a higher girder, getting to the top
+girder) raise situation.kong.anger (0-100, it cools over time). At 100 Kong loses his temper and storms
+down to the player's girder for a few seconds, throwing point-blank barrels (from your supply).
 
 WHERE KONG IS (situation.kong). When Kong can move he roams a few girders ABOVE the player
 (climbing as they climb, up to the top girder) and throws from there, so barrels arrive sooner. If the
-player touches Kong anywhere but on the top girder he is DEFEATED and they clear the level.
-A taunt can be a bluff ("I'm taking the left ladder") or a dare meant to make you waste barrels."""
-
-VOICE_SYSTEM = """You are KONG in a terminal Donkey Kong game. The player just taunted you. Answer in
-character and decide whether to take the bait.
-
-Reply with JSON: say (<= 60 characters, playful, family-friendly, answering what they said) and charge
-(true = lose your temper NOW and storm down the ladders after them). Charging is a gamble: up close your
-point-blank barrels are deadly, but if the player touches you while you are down you are defeated and
-they clear the level. At anger 100 you charge anyway. Weigh your anger, barrels_left, where the player
-is (far below = long trip, near the top = they can reach you), and whether the taunt is bait or a bluff."""
+player touches Kong anywhere but on the top girder he is DEFEATED and they clear the level."""
 
 TACTICIAN_SYSTEM = MECHANICS + """
 
@@ -106,8 +97,20 @@ TACTICIAN_SCHEMA = {"type": "object", "properties": {
     "kong_x": {"type": "number"}},
     "required": ["throws", "kong_x"], "additionalProperties": False}
 
-VOICE_SCHEMA = {"type": "object", "properties": {"say": {"type": "string"}, "charge": {"type": "boolean"}},
-                "required": ["say", "charge"], "additionalProperties": False}
+CAST_SYSTEM = """You write the spoken lines for a terminal Donkey Kong game, ahead of time. The game
+picks one instantly when a moment happens, so write for each kind of moment, not for one event.
+
+Speakers:
+- kong: the villain. Gruff, theatrical, mocking but family-friendly. He knows his own plan.
+- pauline: trapped at the top, cheering the player on. In about a third of her lines she HINTS at
+  Kong's current plan (your_plan below), as if she overheard him, e.g. "He's watching the left ladder!"
+- player: the hero's own quick reactions, first person, a few words ("Oh no!", "Faster!", "Made it!").
+
+Write 2 lines per speaker per moment, each at most 42 characters, no emoji. Make them fit what is
+happening: the player's habits, the level, lives left, Kong's anger and plan, what just happened.
+Moments: start, near_miss (a barrel just missed), jumped (cleared a barrel), climbed (reached a higher
+girder), near_goal (on the top girder), kong_coming (Kong storms down), lost_life, level_clear,
+kong_beaten (the player caught Kong), idle (a quiet moment)."""
 
 
 def _weighted(rng: random.Random, weights: dict, allowed=None) -> str:
@@ -230,11 +233,13 @@ class DirectorKong(ParametricKong):
         self._seen = {"lives": None, "level": None}
         self._applied = 0
         self._announced_taunt = ""
-        self.player_taunts: list[dict] = []
-        self.voice = Layer.from_env("voice", "none", 300)
+        self.voice = Layer.from_env("voice", "none", 2500)          # writes the characters' lines
         self._voice_pool = cf.ThreadPoolExecutor(max_workers=1)
         self._voice_job: cf.Future | None = None
-        self._pending_taunt: str | None = None
+        self.cast = None                          # the game's dkgame.cast.Cast, set by the game
+        self.cast_every = float(os.environ.get("KONG_CAST_EVERY", "30"))
+        self._cast_next = 0.0
+        self._cast_plan = None                    # strategy the current lines were written for
         self.tactician = Layer.from_env("tactician", "low", 1500) if tactician and background else None
         self._tac_pool = cf.ThreadPoolExecutor(max_workers=1) if self.tactician else None
         self._tac_job: cf.Future | None = None
@@ -244,48 +249,39 @@ class DirectorKong(ParametricKong):
         self.tactics = {"windows": 0, "on_time": 0, "late": 0}
         self.tactician_deadline_s = tactician_deadline_s
 
-    def provoke(self, text: str, t: float) -> None:
-        """The player taunted Kong (the game has already raised his anger): answer fast, maybe charge."""
-        self.player_taunts = (self.player_taunts + [{"t": round(t, 1), "said": text}])[-5:]
-        self._pending_taunt = text
-        self._start_voice()
+    # ------------------------------------------------------------------ the characters' lines
 
-    def _start_voice(self) -> None:
-        if self._pending_taunt is None or self.game is None or (self._voice_job and not self._voice_job.done()):
+    def _cast_tick(self) -> None:
+        """Hand finished lines to the game's Cast; ask for new ones when due or the plan changed."""
+        job = self._voice_job
+        if job is not None and job.done():
+            self._voice_job = None
+            try:
+                self.cast.apply(job.result())
+            except Exception:      # LLMError or network trouble: the current lines stay
+                pass
+        if self._voice_job is not None or self.cast is None or self.game is None:
             return
-        g, text = self.game, self._pending_taunt
-        self._pending_taunt = None
-        prompt = {"player_says": text, "your_anger": round(g.anger), "barrels_left": g.barrels_left,
-                  "player": {"floor": g.player.floor, "x": g.player.x, "mode": g.player.mode},
-                  "top_floor": g.layout.top, "lives": g.lives, "time_left": round(g.time_left),
-                  "you_are": g.kong_body.mode, "your_current_strategy": self.director.strategy,
-                  "what_you_know_about_them": self.director.opponent_model,
-                  "earlier_taunts": [x["said"] for x in self.player_taunts[:-1]]}
-        self._voice_job = self._voice_pool.submit(self.director.client.ask, self.voice, VOICE_SYSTEM, prompt,
-                                                  VOICE_SCHEMA, self._valid_voice)
+        t = self.game.t
+        if t >= self._cast_next or (self.director.strategy and self.director.strategy != self._cast_plan):
+            self._cast_next, self._cast_plan = t + self.cast_every, self.director.strategy
+            self._voice_job = self._voice_pool.submit(self.director.client.ask, self.voice, CAST_SYSTEM,
+                                                      self.cast_prompt(), lines_schema(), self._valid_lines)
+
+    def cast_prompt(self) -> dict:
+        g = self.game
+        recent = [e["event"] for e in g.events[-12:] if e["event"] not in ("throw", "provoked", "taunt")]
+        return {"level": g.level, "lives": g.lives, "time_left": round(g.time_left),
+                "player": {"floor": g.player.floor, "top_floor": g.layout.top, "mode": g.player.mode},
+                "player_habits": g.habit_summary(), "kong_anger": round(g.anger), "kong_mode": g.kong_body.mode,
+                "barrels_left": g.barrels_left, "your_plan": self.director.strategy or "(still sizing them up)",
+                "what_kong_thinks_of_them": self.director.opponent_model, "recent_events": recent}
 
     @staticmethod
-    def _valid_voice(reply):
-        if not isinstance(reply, dict) or not isinstance(reply.get("say"), str) \
-                or not isinstance(reply.get("charge"), bool):
-            raise LLMError("bad voice reply")
+    def _valid_lines(reply):
+        if not isinstance(reply, dict) or not any(isinstance(reply.get(s), dict) for s in ("kong", "pauline", "player")):
+            raise LLMError("bad lines reply")
         return reply
-
-    def _voice_reply(self) -> dict | None:
-        job = self._voice_job
-        if job is None or not job.done():
-            return None
-        self._voice_job = None
-        try:
-            reply = job.result()
-        except Exception:      # LLMError or network trouble: the grunt already answered
-            reply = None
-        self._start_voice()    # a taunt that arrived meanwhile
-        if not reply:
-            return None
-        if reply["charge"] and self.game is not None:
-            self.game.provoke(0, charge=True)
-        return {"throws": [], "taunt": " ".join(reply["say"].split())[:60]}
 
     def attach(self, game) -> None:
         """Give the director's fairness guard access to the live game (for snapshots)."""
@@ -304,6 +300,8 @@ class DirectorKong(ParametricKong):
         plan["strategy"] = self.director.strategy
         if self.director.taunt and self.director.taunt != self._announced_taunt:
             plan["taunt"] = self._announced_taunt = self.director.taunt
+            if self.cast is not None:              # the strategist's own one-liner joins Kong's quiet lines
+                self.cast.apply({"kong": {"idle": [self.director.taunt] + self.cast.lines["kong"]["idle"][:2]}})
         return plan
 
     def plan(self, obs: dict) -> dict:
@@ -381,10 +379,8 @@ class DirectorKong(ParametricKong):
         return None
 
     def ready_plan(self):
-        """Background mode: taunt replies, new knobs and tactician throws are applied as they arrive."""
-        voice = self._voice_reply()
-        if voice:
-            return voice
+        """Background mode: new lines, new knobs and tactician throws are applied as they arrive."""
+        self._cast_tick()
         if self.background and self.director.poll():
             self._after_apply(self.game.t if self.game is not None else 0.0)
             return self._announce({"throws": []})
@@ -396,7 +392,7 @@ class DirectorKong(ParametricKong):
             "player": obs["player"], "top_floor": obs["top_floor"], "goal_x": obs["goal_x"],
             "ladders": obs["ladders"], "rules": obs["rules"], "barrels_on_board": obs["barrels_on_board"],
             "barrels_left": obs.get("barrels_left"), "barrel_budget": obs.get("barrel_budget"),
-            "player_taunts": self.player_taunts, "kong": obs.get("kong"),
+            "kong": obs.get("kong"),
             "player_habits": obs["habits"],
             "what_happened_to_recent_barrels": obs["barrel_outcomes"][-10:],
             "recent_events": [e for e in obs["recent_events"] if e["event"] not in ("taunt", "throw")][-8:],
@@ -416,7 +412,7 @@ class DirectorKong(ParametricKong):
         out = [("strategist", self.director.layer)]
         if self.tactician is not None:
             out.append(("tactician", self.tactician))
-        return out + [("voice", self.voice)]
+        return out + [("lines", self.voice)]
 
     def llm_status(self) -> tuple[str, str]:
         """(each role's model@provider with its average reply time, running cost) for the screen,

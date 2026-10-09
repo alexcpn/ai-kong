@@ -1,4 +1,4 @@
-"""Curses drawing for the game: board, sprites, HUD, Kong's taunt and plan."""
+"""Curses drawing for the game: board, sprites, HUD, what the characters say, and Kong's plan."""
 
 from __future__ import annotations
 
@@ -63,11 +63,11 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     put(win, 0, left, f"SCORE {hud['score']:06d}  BEST {hud['best']:06d}  LV {s['level']:02d}  "
                       f"{'♥' * s['lives']}  TIME {int(s['time_left']):02d}{barrels}",
         c("ui") | curses.A_BOLD)
-    taunt = s.get("kong", {}).get("taunt") or ""
-    if hud.get("said"):
-        put(win, 1, left, f'YOU: "{hud["said"]}"'[: layout["width"]], c("player") | curses.A_BOLD)
-    elif taunt:
-        put(win, 1, left, f'KONG: "{taunt}"'[: layout["width"]], c("danger") | curses.A_BOLD)
+    said = hud.get("said")                                # (speaker, line): Kong, Pauline or the player
+    if said:
+        name = {"kong": "KONG", "pauline": "PAULINE", "player": "YOU"}.get(said[0], said[0].upper())
+        colour = {"kong": "danger", "pauline": "goal", "player": "player"}.get(said[0], "ui")
+        put(win, 1, left, f'{name}: "{said[1]}"'[: layout["width"]], c(colour) | curses.A_BOLD)
     oy = 3                                                # header, Kong's speech, then room for his head
     floors = layout["floors"]
     for i, row in enumerate(floors):
@@ -82,9 +82,10 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     kx, ky = kong.get("x", layout["x_min"] + 1), int(kong.get("y", top) + 0.5)
     loose = kong.get("mode", "perch") != "perch"
     look = c("danger") | curses.A_BOLD | (curses.A_REVERSE if loose else 0)
-    put(win, oy + ky - 2, left + kx - 1, "ò ò", look)     # head: just his eyes
-    put(win, oy + ky - 1, left + kx - 1, "▐█▌", look)
-    put(win, oy + ky, left + kx - 1, "/▀\\" if loose else " ▀ ", look)
+    # 4 wide, 3 tall (girders are only 3 rows apart): heavy brow, close-set eyes, body on the girder
+    put(win, oy + ky - 2, left + kx - 1, "▄▄▄▄", look)
+    put(win, oy + ky - 1, left + kx - 1, " ÒÓ " if loose else " òó ", look)
+    put(win, oy + ky, left + kx - 1, "/██\\" if loose else "▐██▌", look)
     put(win, oy + top - 1, left + layout["goal"]["x"] - 1, " O ", c("goal") | curses.A_BOLD)
     put(win, oy + top, left + layout["goal"]["x"] - 1, "|♀|", c("goal") | curses.A_BOLD)
     for b in s["barrels"]:
@@ -102,10 +103,9 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
         for i, ln in enumerate(lines):
             put(win, bottom + i, left, ln, c("player") | curses.A_BOLD)
         bottom += len(lines) - 1
-    put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  T taunt  P pause  Q quit", c("ui"))
+    put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  P pause  Q quit", c("ui"))
     if hud.get("footer"):
-        put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)],
-            c("player") | curses.A_BOLD if hud["footer"].startswith("TAUNT") else c("ui"))
+        put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)], c("ui"))
     cost = hud.get("cost") or ""
     if cost and len(hud.get("footer") or "") + len(cost) + 2 <= layout["width"]:
         put(win, bottom + 2, left + layout["width"] - len(cost), cost, c("goal") | curses.A_BOLD)

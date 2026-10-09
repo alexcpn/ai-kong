@@ -1,7 +1,27 @@
 import sys, time, statistics; sys.path.insert(0, sys.argv[1])
 import dk; dk.load_env_files()
 from director import Layer, LLMClient, LLMError
-from dkgame.director_kong import VOICE_SYSTEM, VOICE_SCHEMA, DirectorKong
+from director import LLMError
+
+# The taunt-reply call as it was measured in October 2026 (taunts were later removed from the game).
+VOICE_SYSTEM = """You are KONG in a terminal Donkey Kong game. The player just taunted you. Answer in
+character and decide whether to take the bait.
+
+Reply with JSON: say (<= 60 characters, playful, family-friendly, answering what they said) and charge
+(true = lose your temper NOW and storm down the ladders after them). Charging is a gamble: up close your
+point-blank barrels are deadly, but if the player touches you while you are down you are defeated and
+they clear the level. At anger 100 you charge anyway. Weigh your anger, barrels_left, where the player
+is (far below = long trip, near the top = they can reach you), and whether the taunt is bait or a bluff."""
+
+VOICE_SCHEMA = {"type": "object", "properties": {"say": {"type": "string"}, "charge": {"type": "boolean"}},
+                "required": ["say", "charge"], "additionalProperties": False}
+
+
+def valid_voice(reply):
+    if not isinstance(reply, dict) or not isinstance(reply.get("say"), str) or not isinstance(reply.get("charge"), bool):
+        raise LLMError("bad voice reply")
+    return reply
+
 prompt = {"player_says": "Bet you can't hit me on a ladder.", "your_anger": 80, "barrels_left": 30,
           "player": {"floor": 2, "x": 20, "mode": "ground"}, "top_floor": 4, "lives": 2}
 cands = [("anthropic/claude-haiku-5.5", None, "none"),
@@ -17,7 +37,7 @@ for model, prov, reasoning in cands:
         for _ in range(3):
             t = time.monotonic()
             try:
-                r = c.ask(layer, VOICE_SYSTEM, prompt, VOICE_SCHEMA, DirectorKong._valid_voice); say = r["say"]
+                r = c.ask(layer, VOICE_SYSTEM, prompt, VOICE_SCHEMA, valid_voice); say = r["say"]
                 times.append(time.monotonic() - t)
             except Exception as e:
                 err = str(e)[:90]; break

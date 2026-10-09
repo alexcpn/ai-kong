@@ -138,8 +138,34 @@ class BudgetTests(unittest.TestCase):
         self.assertIsNone(game.barrels_left)
 
 
-class TauntTests(unittest.TestCase):
-    def make(self, charge):
+class SpeechTests(unittest.TestCase):
+    def test_moments_get_lines_from_the_right_speakers_rate_limited(self):
+        from dkgame.cast import Cast
+        cast = Cast(seed=1)
+        speaker, _ = cast.react([], 0.0)                               # the opening line
+        self.assertIn(speaker, ("pauline", "kong"))
+        self.assertIsNone(cast.react([{"event": "climbed"}], 0.5))        # too soon after the last line
+        speaker, text = cast.react([{"event": "near_miss"}], 0.6)        # urgent: cuts in
+        self.assertEqual(speaker, "player")
+        self.assertTrue(text)
+        self.assertEqual(cast.react([{"event": "player_hit"}], 3.0)[0] in ("player", "kong", "pauline"), True)
+        self.assertIsNone(cast.react([], 4.0))                           # nothing happened, not idle yet
+        self.assertIsNotNone(cast.react([], 20.0))                       # a quiet spell gets an idle line
+
+    def test_new_lines_replace_the_defaults_and_bad_ones_are_dropped(self):
+        from dkgame.cast import MAX_CHARS, Cast
+        cast = Cast(seed=2)
+        kept = cast.apply({"player": {"near_miss": ["Yikes!" + "!" * 80, "", 7], "jumped": []},
+                           "pauline": {"near_miss": ["not her moment"]}, "ghost": {"idle": ["boo"]}})
+        self.assertEqual(kept, 1)
+        self.assertEqual(cast.lines["player"]["near_miss"], [("Yikes!" + "!" * 80)[:MAX_CHARS]])
+        self.assertTrue(cast.lines["player"]["jumped"])                  # empty list kept the defaults
+        self.assertNotIn("near_miss", cast.lines["pauline"])
+        self.assertEqual(cast.apply("nonsense"), 0)
+
+    def test_ai_kong_writes_the_lines_ahead_of_time(self):
+        import time
+        from dkgame.cast import Cast
         from dkgame.director_kong import DEFAULT_KNOBS, DirectorKong
 
         prompts = []
@@ -147,9 +173,11 @@ class TauntTests(unittest.TestCase):
         class Stub:
             def ask(self, layer, system, prompt, schema, validate):
                 prompts.append(prompt)
-                if "say" in schema["properties"]:                       # the fast voice call
-                    return validate({"say": "Ladders are my thing.", "charge": charge})
-                return validate({"opponent_model": "", "strategy": "s", "reasons": "", "taunt": "",
+                if "pauline" in schema["properties"]:                     # the lines call
+                    return validate({"kong": {"idle": ["Ladder 12 is mine."]},
+                                     "pauline": {"idle": ["He's watching ladder 12!"]},
+                                     "player": {"near_miss": ["Yikes!"]}})
+                return validate({"opponent_model": "", "strategy": "Ambush ladder 12", "reasons": "", "taunt": "",
                                  "knobs": dict(DEFAULT_KNOBS)})
 
             def total_usage(self):
@@ -159,32 +187,33 @@ class TauntTests(unittest.TestCase):
         kong = DirectorKong(background=True, client=Stub(), guard=False)
         game = Game(layout, params, kong, seed=2)
         kong.attach(game)
-        for _ in range(40):
-            game.step(())
-        return game, kong, prompts
-
-    def taunt_and_wait(self, game, kong):
-        import time
-        game.provoke(dk.TAUNT_ANGER)
-        self.assertIn(game.taunt, ("Hmph.", "GRRRR!"))                # instant grunt
-        kong.provoke(dk.TAUNTS[3], game.t)
+        kong.cast = cast = Cast(seed=2)
         deadline = time.monotonic() + 5
-        while game.taunt != "Ladders are my thing." and time.monotonic() < deadline:
+        while cast.updates < 2 and time.monotonic() < deadline:          # start, then again for the new plan
             game.step(())
             time.sleep(0.002)
-        self.assertEqual(game.taunt, "Ladders are my thing.")
+        self.assertGreaterEqual(cast.updates, 2)
+        self.assertEqual(cast.lines["pauline"]["idle"], ["He's watching ladder 12!"])
+        lines_prompts = [p for p in prompts if "your_plan" in p]
+        self.assertEqual(lines_prompts[-1]["your_plan"], "Ambush ladder 12")
 
-    def test_voice_answers_without_charging(self):
-        game, kong, prompts = self.make(charge=False)
-        self.taunt_and_wait(game, kong)
-        voice = [p for p in prompts if "player_says" in p][-1]
-        self.assertEqual(voice["player_says"], dk.TAUNTS[3])
-        self.assertEqual(game.kong_body.mode, "perch")
-
-    def test_taking_the_bait_sends_kong_down(self):
-        game, kong, _ = self.make(charge=True)
-        self.taunt_and_wait(game, kong)
-        self.assertEqual(game.kong_body.mode, "rampage")
+    def test_a_close_shave_is_one_near_miss_event(self):
+        from dkgame.engine import Barrel
+        layout, params = dk.make_variant("classic", 9)
+        game = Game(layout, params, Quiet(), seed=9)
+        p = game.player
+        p.invuln_until = 0.0
+        game.barrels.append(Barrel(id=998, x=p.x + 3, floor=0, y=p.y, direction=-1, step_gap=0.15,
+                                   route="never", step_at=game.t + 0.04))          # coming at the player
+        game.step(())
+        self.assertFalse(any(e["event"] == "near_miss" for e in game.events))   # not a miss yet
+        game.barrels.clear()
+        game.barrels.append(Barrel(id=999, x=p.x + 1, floor=0, y=p.y, direction=1, step_gap=0.15,
+                                   route="never", step_at=game.t + 0.04))          # just went past
+        for _ in range(4):
+            game.step(())
+        self.assertEqual(game.lives, game.params.start_lives)
+        self.assertEqual(sum(1 for e in game.events if e["event"] == "near_miss"), 1)
 
 
 class TemperTests(unittest.TestCase):
@@ -194,16 +223,29 @@ class TemperTests(unittest.TestCase):
         game.player.invuln_until = 1e9
         return game
 
-    def test_three_quick_taunts_start_a_rampage_and_anger_cools(self):
+    def test_the_players_successes_anger_kong_until_he_storms(self):
         game = self.game()
-        game.provoke(dk.TAUNT_ANGER)
+        prm, p = game.params, game.player
+        p.climb_target = 1
+        game._finish_climb()                                           # reached a higher girder
+        self.assertEqual(game.anger, prm.anger_per_climb)
         for _ in range(40):
             game.step(())
-        self.assertLess(game.anger, dk.TAUNT_ANGER)                   # cools while he sits
-        game.provoke(dk.TAUNT_ANGER)
-        self.assertEqual(game.kong_body.mode, "perch")
-        game.provoke(dk.TAUNT_ANGER)
+        self.assertLess(game.anger, prm.anger_per_climb)              # cools while he sits
+        p.climb_target = game.layout.top
+        game._finish_climb()                                           # the top girder
+        self.assertTrue(any(e["event"] == "near_goal" for e in game.events))
+        while game.kong_body.mode == "perch":
+            game._rile(prm.anger_per_jump)                             # barrels jumped
         self.assertEqual(game.kong_body.mode, "rampage")
+
+    def test_anger_from_play_is_off_by_default(self):
+        layout, _ = dk.make_variant("classic", 4)
+        game = Game(layout, dk.Params(), Quiet(), seed=4)
+        game.player.climb_target = 1
+        game._finish_climb()
+        game._rile(50)
+        self.assertEqual(game.anger, 0)
 
     def test_rampaging_kong_comes_down_then_goes_home(self):
         game = self.game()
