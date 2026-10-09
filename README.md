@@ -10,9 +10,6 @@ its tactics**, without ever making the game lag. Pure Python standard library: n
 The article behind it, with published and measured LLM speed and cost data:
 [Using Slow Reasoning LLMs for Fast Games](docs/article/llm-real-time-game-2026-10.md).
 
-<img width="745" height="601" alt="Screenshot from 2026-10-09 19-58-34" src="https://github.com/user-attachments/assets/ae4e31d0-4e99-4b8a-8f29-6bf885888483" />
-
-
 
 ## Quick start
 
@@ -20,18 +17,7 @@ The article behind it, with published and measured LLM speed and cost data:
 git clone https://github.com/alexcpn/ai-kong.git && cd ai-kong
 
 python3 dk.py                                      # menu: pick an opponent and a board
-
-# no LLM, for testing without a key
-python3 dk.py --kong classic
-python3 dk.py --kong classic --board tall --seed 7 # same seed = same board
-
-# AI Kong (needs an OpenRouter key, see below)
-python3 dk.py --kong ai
-KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai --board tall
 ```
-
-Options: `--kong ai|classic`, `--board random|classic|tall|sparse`,
-`--seed N`. Without `--kong` you get the menu.
 
 In a game: arrows (or WASD) move, Space jumps, P pauses, Q quits.
 
@@ -133,7 +119,8 @@ KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai       # more deliberate pla
 KONG_USE_TACTICIAN=0 python3 dk.py --kong ai               # strategist + knobs only
 ```
 
-How it stays fair and lag-free:
+## How it stays fair and lag-free:
+
 - The LLM never moves barrels itself. The strategist sets 8 **knobs** for a deterministic Kong: throw rate,
   speed mix, route mix, burst chance, ladder ambush, rhythm jitter, hold-back lulls and where Kong
   stands. The tactician only chooses each throw's timing, speed and route, within the engine's limits.
