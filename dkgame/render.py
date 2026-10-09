@@ -99,10 +99,17 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     if hud.get("controls"):
         put(win, bottom + 1, left, hud["controls"], c("goal") | curses.A_BOLD)
     else:
-        put(win, bottom + 1, left, "←→/AD move  ↑↓/WS climb  SPACE jump  H agent  P pause  Q quit", c("ui"))
+        put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  H agent  P pause  Q quit", c("ui"))
     if hud.get("footer"):
         put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)],
             c("player") | curses.A_BOLD if hud["footer"].startswith("TAUNT") else c("ui"))
+    cost = hud.get("cost") or ""
+    if cost and len(hud.get("footer") or "") + len(cost) + 2 <= layout["width"]:
+        put(win, bottom + 2, left + layout["width"] - len(cost), cost, c("goal") | curses.A_BOLD)
+        cost = ""                                         # shown at the right end of the footer row
+    if hud.get("llm") and bottom + 3 < h:                # models line, when the terminal has a spare row
+        line = hud["llm"] + (f" · {cost}" if cost else "")
+        put(win, bottom + 3, left, line[: max(layout["width"], w - left)], c("goal"))
     if hud.get("banner"):
         centre(win, oy + floors[0] // 2, hud["banner"], c("ui") | curses.A_REVERSE | curses.A_BOLD)
     win.refresh()

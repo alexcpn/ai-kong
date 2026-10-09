@@ -123,6 +123,11 @@ engine carries that out every tick. Taunts go to a second,
 fast LLM call with no reasoning, so Kong answers in a second or two. The knob limits and fairness
 guard apply to everything the strategist decides.
 
+The screen shows what this costs as you play: the running total at the right of the bottom row, and,
+if your terminal has a spare row (25+ rows; ~90 columns shows it in full), which models play Kong, their average
+reply time and the number of calls. The menu shows the models before you start, and the game-over
+line the total.
+
 Only AI Kong uses the network: it sends OpenRouter a summary of the game state and your play
 statistics. Nothing else leaves your machine.
 

@@ -155,6 +155,8 @@ def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
             note = ("An LLM studies your habits and re-plans Kong's tactics every ~20 s."
                     if has_key else "Needs an OpenRouter key: see README.md (key file not found).")
             centre(win, top + 18, note)
+            if has_key:
+                centre(win, top + 19, ai_models())
         centre(win, top + 20, "↑↓ choose   ←→ change   ENTER play   Q quit")
         win.refresh()
         key = win.getch()
@@ -176,6 +178,13 @@ def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
             if OPPONENTS[choice["opponent"]][0] == "ai" and not has_key:
                 continue
             return choice
+
+
+def ai_models() -> str:
+    """The models AI Kong will use (from the environment / .config/config.env)."""
+    from director import Layer
+    brain, voice = Layer.from_env("director", "medium", 8000), Layer.from_env("voice", "none", 300)
+    return f"{brain.model.split('/')[-1]} ({brain.reasoning}) + {voice.model.split('/')[-1]} for taunts"
 
 
 def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
@@ -201,7 +210,7 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
         if taunt["open"]:
             footer = f"TAUNT ←{TAUNTS[taunt['pick']]:^35}→ ENTER/ESC"
         elif mode == "rampage":
-            footer = "KONG IS DOWN!  Touch him to beat the level (+3000)"
+            footer = "KONG IS COMING FOR YOU!  Touch him to beat the level"
         elif mode == "return":
             footer = "Kong is climbing back up... catch him!"
         else:
@@ -209,8 +218,10 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             bar = "█" * int(game.anger / 10) + "░" * (10 - int(game.anger / 10))
             footer = f"ANGER {bar}   " + ("T taunt Kong" if wait <= 0 else f"taunt in {int(wait) + 1}s")
         controls = "AGENT PLAYING  ·  H take back   T taunt  P pause  Q quit" if agent else ""
+        llm, cost = kong.llm_status() if hasattr(kong, "llm_status") else ("", "")
         return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
-                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer, "controls": controls}
+                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer, "controls": controls,
+                "llm": llm, "cost": cost}
 
     while not game.over:
         now = time.monotonic()
@@ -281,7 +292,8 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
         scores[opponent] = scorer.score
         save_scores(scores)
     note = "  NEW BEST!" if new_best else "  (agent-assisted)" if assisted else ""
-    summary = f" GAME OVER  score {scorer.score:06d}{note}  level {game.level} "
+    cost = f"  LLM {kong.llm_status()[1]}" if hasattr(kong, "llm_status") else ""
+    summary = f" GAME OVER  score {scorer.score:06d}{note}  level {game.level}{cost} "
     draw_game(win, lay, game.state(), {**hud(summary), "best": max(best, scorer.score)})
     put(win, 0, 0, "")
     centre(win, win.getmaxyx()[0] - 1, "R retry   M menu   Q quit", curses.A_BOLD)

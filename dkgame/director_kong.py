@@ -332,6 +332,27 @@ class DirectorKong(ParametricKong):
     def usage(self) -> dict:
         return self.director.client.total_usage()
 
+    def models(self) -> str:
+        """Which models play Kong, e.g. "strategist claude-haiku-5.5 (medium) · voice claude-haiku-5.5"."""
+        brain, voice = self.director.layer, self.voice
+        short = lambda m: m.split("/")[-1]  # noqa: E731
+        reasoning = f" ({brain.reasoning})" if brain.reasoning in ("low", "medium", "high") else ""
+        return f"strategist {short(brain.model)}{reasoning} · voice {short(voice.model)}"
+
+    def llm_status(self) -> tuple[str, str]:
+        """(models with average reply times and call count, running cost) for the screen."""
+        per_layer = getattr(self.director.client, "usage", {})
+        parts = []
+        for layer in (self.director.layer, self.voice):
+            u = per_layer.get(layer.name) if isinstance(per_layer, dict) else None
+            wait = f", {u['seconds'] / u['calls']:.1f}s" if u and u["calls"] else ""
+            reasoning = f"{layer.reasoning}" if layer.reasoning in ("low", "medium", "high") else ""
+            extra = ", ".join(x for x in (reasoning, wait.lstrip(", ")) if x)
+            role = "strategist" if layer is self.director.layer else "voice"
+            parts.append(f"{role} {layer.model.split('/')[-1]}" + (f" ({extra})" if extra else ""))
+        total = self.usage()
+        return " · ".join(parts) + f" · {total.get('calls', 0)} calls", f"${total.get('cost_usd', 0.0):.4f}"
+
     def display(self) -> str:
         """One line for human viewers: the current strategy and the knobs it last changed."""
         line = self.director.strategy or "(thinking...)"
