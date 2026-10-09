@@ -97,7 +97,9 @@ class Scorer:
 
 def make_variant(board: str, seed: int):
     rng = random.Random(seed * 31 + 5)
-    params = Params(max_levels=99)                                     # endless: play for score
+    # endless (play for score), with a floatier jump than the engine default: same 2-row peak,
+    # ~0.85 s in the air instead of ~0.6 s, so landings are readable at terminal frame rates
+    params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0)
     if board == "classic":
         return CLASSIC_LAYOUT, params
     floors = 6 if board == "tall" else None
