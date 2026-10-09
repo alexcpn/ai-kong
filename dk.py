@@ -108,7 +108,6 @@ def make_variant(board: str, seed: int):
     # Difficulty levers: throw_gap_scale / extra_barrels / kong_interval (pace), kong_floors_above
     # (reaction time: barrels from further up take longer to arrive), invuln_time.
     params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0, barrel_budget=45, barrel_budget_per_level=8,
-                    anger_from_play=True,
                     kong_interval=2.0, throw_gap_scale=0.6, extra_barrels=2, kong_moves=True, kong_floors_above=3,
                     invuln_time=3.0)
     if board == "classic":
@@ -224,21 +223,19 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
         kong.cast = cast                                   # AI Kong rewrites the lines as the game goes
     speech = {"speaker": "", "text": "", "until": 0.0, "last": None}
 
+    flash = {"score": 0, "lives": game.lives, "score_until": -1.0, "lives_until": -1.0}
+
     def hud(banner: str = "") -> dict:
         plan = kong.display() if hasattr(kong, "display") else ""
+        if scorer.score != flash["score"]:                 # points gained: the score flashes for a second
+            flash.update(score=scorer.score, score_until=game.t + 1.0)
+        if game.lives != flash["lives"]:                   # a life lost: the hearts flash for two
+            flash.update(lives=game.lives, lives_until=game.t + 2.0)
         said = (speech["speaker"], speech["text"]) if game.t < speech["until"] else None
-        mode = game.kong_body.mode
-        if mode == "rampage":
-            footer = "KONG IS COMING FOR YOU!  Touch him to beat the level"
-        elif mode == "return":
-            footer = "Kong is climbing back up... catch him!"
-        else:
-            bar = "█" * int(game.anger / 10) + "░" * (10 - int(game.anger / 10))
-            footer = f"ANGER {bar}"
-        llm, cost = kong.llm_status() if hasattr(kong, "llm_status") else ("", "")
+        llm, cost = kong.llm_status() if hasattr(kong, "llm_status") else ("Classic Kong: no LLM", "")
         return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
-                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer,
-                "llm": llm, "cost": cost}
+                "banner": banner, "popups": scorer.popups, "said": said, "llm": llm, "cost": cost,
+                "score_flash": game.t < flash["score_until"], "lives_flash": game.t < flash["lives_until"]}
 
     while not game.over:
         now = time.monotonic()

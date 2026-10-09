@@ -454,7 +454,8 @@ class Game:
             x, direction, floor = lay.spawn_x, 1, lay.top
             if self.params.kong_moves:                 # from wherever Kong stands, rolled toward the player
                 direction = 1 if self.player.x >= k.x else -1
-                x, floor = min(lay.x_max, max(lay.x_min, k.x + direction)), k.floor
+                x = k.x + 2 * direction                           # from his hands, just outside his body
+                x, floor = min(lay.x_max, max(lay.x_min, x)), k.floor
             barrel = Barrel(id=self._id(), x=x, floor=floor, y=float(lay.floors[floor]),
                             direction=direction, step_gap=gap, route=q.route, step_at=self.t + gap,
                             thrown_at=self.t, speed_name=q.speed)
@@ -497,7 +498,8 @@ class Game:
             self.provoke(amount)
 
     def kong_range(self, floor: int) -> tuple[int, int]:
-        """Where Kong may stand on a girder (on the top one, not within a few columns of Pauline)."""
+        """Where Kong may stand on a girder (on the top one, not within a few columns of Pauline).
+        Kong is drawn 3 columns wide, from x-1 to x+1."""
         lay = self.layout
         lo = lay.x_min + 1
         return (lo, max(lo, lay.goal_x - 5)) if floor == lay.top else (lo, lay.x_max - 1)
@@ -797,7 +799,7 @@ class Game:
         p, prm = self.player, self.params
         k = self.kong_body
         off_top = k.mode != "perch" or k.floor != self.layout.top or k.climb_to is not None
-        if off_top and -1 <= p.x - k.x <= 2 and k.y - 2.0 - 1e-9 <= p.y <= k.y + 0.5:   # his 4x3 sprite
+        if off_top and abs(p.x - k.x) <= 1 and k.y - 2.0 - 1e-9 <= p.y <= k.y + 0.5:   # his 3x3 sprite
             self.stats["kong_defeats"] += 1              # caught him away from his top girder
             self._event("kong_defeated", floor=k.floor, x=k.x)
             self._kong_beaten = True

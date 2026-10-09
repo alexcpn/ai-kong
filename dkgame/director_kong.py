@@ -67,10 +67,6 @@ level ends are WASTED, and a level usually lasts 30-60 s: a passive Kong loses. 
 pressure (throw_rate 0.5+), spend extra in bursts and ambushes where the player is weakest (ladders
 they favour, the climb to the goal), and plan to be nearly empty as they reach the top.
 
-TEMPER. The player's successes (jumping your barrels, reaching a higher girder, getting to the top
-girder) raise situation.kong.anger (0-100, it cools over time). At 100 Kong loses his temper and storms
-down to the player's girder for a few seconds, throwing point-blank barrels (from your supply).
-
 WHERE KONG IS (situation.kong). When Kong can move he roams a few girders ABOVE the player
 (climbing as they climb, up to the top girder) and throws from there, so barrels arrive sooner. If the
 player touches Kong anywhere but on the top girder he is DEFEATED and they clear the level."""
@@ -109,7 +105,7 @@ Speakers:
 Write 2 lines per speaker per moment, each at most 42 characters, no emoji. Make them fit what is
 happening: the player's habits, the level, lives left, Kong's anger and plan, what just happened.
 Moments: start, near_miss (a barrel just missed), jumped (cleared a barrel), climbed (reached a higher
-girder), near_goal (on the top girder), kong_coming (Kong storms down), lost_life, level_clear,
+girder), near_goal (on the top girder), lost_life, level_clear,
 kong_beaten (the player caught Kong), idle (a quiet moment)."""
 
 
@@ -273,7 +269,7 @@ class DirectorKong(ParametricKong):
         recent = [e["event"] for e in g.events[-12:] if e["event"] not in ("throw", "provoked", "taunt")]
         return {"level": g.level, "lives": g.lives, "time_left": round(g.time_left),
                 "player": {"floor": g.player.floor, "top_floor": g.layout.top, "mode": g.player.mode},
-                "player_habits": g.habit_summary(), "kong_anger": round(g.anger), "kong_mode": g.kong_body.mode,
+                "player_habits": g.habit_summary(), "kong_floor": g.kong_body.floor,
                 "barrels_left": g.barrels_left, "your_plan": self.director.strategy or "(still sizing them up)",
                 "what_kong_thinks_of_them": self.director.opponent_model, "recent_events": recent}
 
@@ -415,23 +411,31 @@ class DirectorKong(ParametricKong):
         return out + [("lines", self.voice)]
 
     def llm_status(self) -> tuple[str, str]:
-        """(each role's model@provider with its average reply time, running cost) for the screen,
-        e.g. "strategist gpt-oss-120b@cerebras 2.1s · tactician @groq 0.5s 3% late · voice @groq 0.4s"."""
+        """(a compact line for the screen, running cost), e.g.
+        "haiku-5.5 · plan 6.5s · lines 13.6s · 9 calls" or, with different models,
+        "plan gpt-oss-120b@cerebras 2.1s · throws gpt-oss-20b@groq 0.6s 20% late · lines ..."
+        """
         per_layer = getattr(self.director.client, "usage", {})
-        parts, last_model = [], None
-        for role, layer in self.roles():
+        short = lambda layer: layer.model.split("/")[-1].removeprefix("claude-")  # noqa: E731
+        labels = {"strategist": "plan", "tactician": "throws", "lines": "lines"}
+        roles = self.roles()
+        one_model = len({short(layer) for _, layer in roles}) == 1
+        parts = []
+        for role, layer in roles:
             u = per_layer.get(layer.name) if isinstance(per_layer, dict) else None
-            model = layer.model.split("/")[-1]
-            where = ("" if model == last_model else model) + (f"@{layer.provider}" if layer.provider else "")
-            last_model = model
-            text = f"{role} {where or model}"
+            text = labels.get(role, role)
+            if not one_model:
+                text += f" {short(layer)}"
+            if layer.provider:
+                text += f"@{layer.provider}"
             if u and u["calls"]:
                 text += f" {u['seconds'] / u['calls']:.1f}s"
             if role == "tactician" and self.tactics["windows"]:
                 text += f" {round(100 * self.tactics['late'] / self.tactics['windows'])}% late"
             parts.append(text)
         total = self.usage()
-        return " · ".join(parts) + f" · {total.get('calls', 0)} calls", f"${total.get('cost_usd', 0.0):.4f}"
+        head = f"{short(roles[0][1])} · " if one_model else ""
+        return head + " · ".join(parts) + f" · {total.get('calls', 0)} calls", f"${total.get('cost_usd', 0.0):.4f}"
 
     def display(self) -> str:
         """One line for human viewers: the current strategy and the knobs it last changed."""

@@ -217,9 +217,11 @@ class SpeechTests(unittest.TestCase):
 
 
 class TemperTests(unittest.TestCase):
+    """Kong's anger and rampage are engine features (off in the game since the anger meter went)."""
     def game(self):
+        from dataclasses import replace
         layout, params = dk.make_variant("classic", 4)
-        game = Game(layout, params, Quiet(), seed=4)
+        game = Game(layout, replace(params, anger_from_play=True), Quiet(), seed=4)
         game.player.invuln_until = 1e9
         return game
 

@@ -1,6 +1,8 @@
 # AI Kong: A Pattern for using Slow Reasoning LLMs for Fast Games
 
 
+![AI Kong in a 256-colour terminal: Kong, Pauline, barrels and the player as half-block pixel sprites on red girders](docs/images/screenshot.png)
+
 A terminal Donkey Kong where Kong can be driven by an LLM that **studies how you play and re-plans
 its tactics**, without ever making the game lag. Pure Python standard library: no installs
 (`python-dotenv` is optional, to load settings from `.config/`).
@@ -58,7 +60,9 @@ To configure AI Kong from files instead of the shell, put the key in
 `.config/config.env`, then `pip install python-dotenv`. `dk.py` loads both at start-up, and
 variables already set in your shell take precedence.
 
-Use a terminal of at least 60 × 25 (60 × 29 for the Tall board). Pick an opponent and a board in the menu, then climb to Pauline (`|♀|`)
+Use a terminal of at least 60 × 25 (60 × 29 for the Tall board). On a 256-colour terminal (most today)
+Kong, Pauline, the barrels and you are small pixel-art sprites; with fewer colours you get plain
+character art. Pick an opponent and a board in the menu, then climb to Pauline (`|♀|`)
 at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the girders too.
 
 ## Controls
@@ -90,13 +94,8 @@ Kong the lines are written by an LLM a few times a minute, fitted to how you pla
 plan, and the game picks one the instant something happens, so nobody waits for the network. Classic
 Kong uses built-in lines.
 
-**Kong's temper**: doing well makes Kong angry. Jumping his barrels, reaching a higher girder and
-getting to the top girder fill his ANGER meter (it cools over time). At full anger he loses his temper.
-
-An angry Kong storms down to your girder, throwing barrels on the way and from a few columns away
-(these come out of his supply). **Touch him and Kong is beaten**: +3000 and the level is cleared.
-After a few seconds on your girder he climbs back up, and you can still catch him on the way. Classic Kong
-has a temper too.
+**Catch Kong**: he roams a few girders above you, so if you get to him anywhere but the top girder,
+touch him and he's beaten: +3000 and the level is cleared.
 
 Boards: **Random** (a new layout each game), **Classic**, **Tall** (6 girders), **Sparse** (a
 single ladder between girders). Use `--seed N` to replay the same board.
@@ -156,10 +155,9 @@ never waits on the network either.
 The knob limits and fairness guard apply to the strategist; the engine's per-level limits (throws
 per decision, gaps, barrels on screen) apply to every throw, whoever chose it.
 
-The screen shows what this costs as you play: the running total at the right of the bottom row, and,
-if your terminal has a spare row (26+ rows; ~90 columns shows it in full), which models play Kong, their average
-reply time and the number of calls. The menu shows the models before you start, and the game-over
-line the total.
+The bottom row shows the LLM side as you play: which models play Kong, their average reply time, the
+number of calls and the running cost (e.g. `LLM  haiku-5.5 · plan 6.5s · lines 13.6s · 9 calls  $0.0044`).
+The menu shows the models before you start, and the game-over line the total.
 
 Only AI Kong uses the network: it sends OpenRouter a summary of the game state and your play
 statistics. Nothing else leaves your machine.
