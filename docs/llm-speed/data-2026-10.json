@@ -6,44 +6,168 @@
       "source": "https://artificialanalysis.ai/models/gpt-oss-120b/providers",
       "method": "median (P50) over the past 72 hours, 10,000-token input workload; first chunk latency in seconds",
       "rows": [
-        {"provider": "Cerebras", "output_tok_s": 1643, "first_chunk_s": 0.44},
-        {"provider": "SambaNova", "output_tok_s": 706, "first_chunk_s": 1.15},
-        {"provider": "Groq", "output_tok_s": 471, "first_chunk_s": 0.71},
-        {"provider": "Azure", "output_tok_s": 370, "first_chunk_s": 0.85},
-        {"provider": "Nebius (Base)", "output_tok_s": 264, "first_chunk_s": 0.91},
-        {"provider": "Crusoe", "output_tok_s": 241, "first_chunk_s": 0.40},
-        {"provider": "Baseten", "output_tok_s": 238, "first_chunk_s": 0.20},
-        {"provider": "Novita", "output_tok_s": 188, "first_chunk_s": 0.95},
-        {"provider": "DeepInfra (Turbo)", "output_tok_s": 167, "first_chunk_s": 0.89},
-        {"provider": "Parasail", "output_tok_s": 132, "first_chunk_s": 0.91},
-        {"provider": "Scaleway", "output_tok_s": 123, "first_chunk_s": 1.35},
-        {"provider": "Together AI", "output_tok_s": 107, "first_chunk_s": 0.44},
-        {"provider": "Google Vertex", "output_tok_s": 87, "first_chunk_s": 1.33},
-        {"provider": "Amazon Bedrock", "output_tok_s": 84, "first_chunk_s": 1.09},
-        {"provider": "CoreWeave", "output_tok_s": 44, "first_chunk_s": 1.24},
-        {"provider": "DeepInfra", "output_tok_s": 43, "first_chunk_s": 0.68}
+        {
+          "provider": "Cerebras",
+          "output_tok_s": 1643,
+          "first_chunk_s": 0.44
+        },
+        {
+          "provider": "SambaNova",
+          "output_tok_s": 706,
+          "first_chunk_s": 1.15
+        },
+        {
+          "provider": "Groq",
+          "output_tok_s": 471,
+          "first_chunk_s": 0.71
+        },
+        {
+          "provider": "Azure",
+          "output_tok_s": 370,
+          "first_chunk_s": 0.85
+        },
+        {
+          "provider": "Nebius (Base)",
+          "output_tok_s": 264,
+          "first_chunk_s": 0.91
+        },
+        {
+          "provider": "Crusoe",
+          "output_tok_s": 241,
+          "first_chunk_s": 0.4
+        },
+        {
+          "provider": "Baseten",
+          "output_tok_s": 238,
+          "first_chunk_s": 0.2
+        },
+        {
+          "provider": "Novita",
+          "output_tok_s": 188,
+          "first_chunk_s": 0.95
+        },
+        {
+          "provider": "DeepInfra (Turbo)",
+          "output_tok_s": 167,
+          "first_chunk_s": 0.89
+        },
+        {
+          "provider": "Parasail",
+          "output_tok_s": 132,
+          "first_chunk_s": 0.91
+        },
+        {
+          "provider": "Scaleway",
+          "output_tok_s": 123,
+          "first_chunk_s": 1.35
+        },
+        {
+          "provider": "Together AI",
+          "output_tok_s": 107,
+          "first_chunk_s": 0.44
+        },
+        {
+          "provider": "Google Vertex",
+          "output_tok_s": 87,
+          "first_chunk_s": 1.33
+        },
+        {
+          "provider": "Amazon Bedrock",
+          "output_tok_s": 84,
+          "first_chunk_s": 1.09
+        },
+        {
+          "provider": "CoreWeave",
+          "output_tok_s": 44,
+          "first_chunk_s": 1.24
+        },
+        {
+          "provider": "DeepInfra",
+          "output_tok_s": 43,
+          "first_chunk_s": 0.68
+        }
       ],
-      "time_to_first_answer_token_s_incl_reasoning": {"Cerebras": 1.66, "SambaNova": 3.98, "Groq": 4.95, "Azure": 6.25, "Nebius (Base)": 8.48}
+      "time_to_first_answer_token_s_incl_reasoning": {
+        "Cerebras": 1.66,
+        "SambaNova": 3.98,
+        "Groq": 4.95,
+        "Azure": 6.25,
+        "Nebius (Base)": 8.48
+      }
     },
     "openbenchmarks_glm_5_3_flash": {
       "source": "https://openbenchmarks.com/inference/fastest-llm-api-provider",
       "method": "2026-09-03; 600 requests per provider, streaming, reasoning low, 256-token output cap, concurrency 1, client clock",
       "rows": [
-        {"provider": "Baseten", "median_ms": 331, "ttft_p95_s": 1.16, "tok_s": 240.5},
-        {"provider": "Modal", "median_ms": 574, "ttft_p95_s": 1.09, "tok_s": 222.2},
-        {"provider": "Together AI", "median_ms": 609, "ttft_p95_s": 2.26, "tok_s": 151.6},
-        {"provider": "Telnyx", "median_ms": 669, "ttft_p95_s": 1.34, "tok_s": 184.3},
-        {"provider": "Nebius", "median_ms": 1450, "ttft_p95_s": 7.11, "tok_s": 269.3},
-        {"provider": "Parasail", "median_ms": 1590, "ttft_p95_s": 5.54, "tok_s": 52.4},
-        {"provider": "Novita AI", "median_ms": 1740, "ttft_p95_s": 3.41, "tok_s": 60.6},
-        {"provider": "Z.AI", "median_ms": 1750, "ttft_p95_s": 3.14, "tok_s": 56.3},
-        {"provider": "DeepInfra", "median_ms": 1830, "ttft_p95_s": 6.41, "tok_s": 69.4},
-        {"provider": "Fireworks AI", "median_ms": 1950, "ttft_p95_s": 5.83, "tok_s": 58.2}
+        {
+          "provider": "Baseten",
+          "median_ms": 331,
+          "ttft_p95_s": 1.16,
+          "tok_s": 240.5
+        },
+        {
+          "provider": "Modal",
+          "median_ms": 574,
+          "ttft_p95_s": 1.09,
+          "tok_s": 222.2
+        },
+        {
+          "provider": "Together AI",
+          "median_ms": 609,
+          "ttft_p95_s": 2.26,
+          "tok_s": 151.6
+        },
+        {
+          "provider": "Telnyx",
+          "median_ms": 669,
+          "ttft_p95_s": 1.34,
+          "tok_s": 184.3
+        },
+        {
+          "provider": "Nebius",
+          "median_ms": 1450,
+          "ttft_p95_s": 7.11,
+          "tok_s": 269.3
+        },
+        {
+          "provider": "Parasail",
+          "median_ms": 1590,
+          "ttft_p95_s": 5.54,
+          "tok_s": 52.4
+        },
+        {
+          "provider": "Novita AI",
+          "median_ms": 1740,
+          "ttft_p95_s": 3.41,
+          "tok_s": 60.6
+        },
+        {
+          "provider": "Z.AI",
+          "median_ms": 1750,
+          "ttft_p95_s": 3.14,
+          "tok_s": 56.3
+        },
+        {
+          "provider": "DeepInfra",
+          "median_ms": 1830,
+          "ttft_p95_s": 6.41,
+          "tok_s": 69.4
+        },
+        {
+          "provider": "Fireworks AI",
+          "median_ms": 1950,
+          "ttft_p95_s": 5.83,
+          "tok_s": 58.2
+        }
       ]
     },
     "prices_gpt_oss_120b_output_per_1m": {
       "source": "https://perkstack.co/blog/groq-vs-cerebras",
-      "rows": {"Groq": 0.60, "Cerebras": 0.75, "DeepInfra": 0.17}
+      "rows": {
+        "Groq": 0.6,
+        "Cerebras": 0.75,
+        "DeepInfra": 0.17
+      }
     }
   },
   "measured": {
@@ -52,43 +176,222 @@
       "what": "~100-token JSON answer to a player taunt; small prompt",
       "script": "bench_taunt_reply.py",
       "rows": [
-        {"model": "anthropic/claude-haiku-5.5", "provider": "default", "reasoning": "none", "median_s": 1.90, "best_s": 1.78, "usd_per_call": 0.00007},
-        {"model": "openai/gpt-oss-120b", "provider": "groq", "reasoning": "low", "median_s": 0.37, "best_s": 0.33, "usd_per_call": 0.00010},
-        {"model": "openai/gpt-oss-20b", "provider": "groq", "reasoning": "low", "median_s": 0.55, "best_s": 0.45, "usd_per_call": 0.00005},
-        {"model": "openai/gpt-oss-120b", "provider": "cerebras", "reasoning": "low", "median_s": 0.66, "best_s": 0.48, "usd_per_call": 0.00023},
-        {"model": "openai/gpt-oss-120b", "provider": "baseten", "reasoning": "low", "median_s": 1.35, "best_s": 1.24, "usd_per_call": 0.00008}
+        {
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "default",
+          "reasoning": "none",
+          "median_s": 1.9,
+          "best_s": 1.78,
+          "usd_per_call": 7e-05
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "low",
+          "median_s": 0.37,
+          "best_s": 0.33,
+          "usd_per_call": 0.0001
+        },
+        {
+          "model": "openai/gpt-oss-20b",
+          "provider": "groq",
+          "reasoning": "low",
+          "median_s": 0.55,
+          "best_s": 0.45,
+          "usd_per_call": 5e-05
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "cerebras",
+          "reasoning": "low",
+          "median_s": 0.66,
+          "best_s": 0.48,
+          "usd_per_call": 0.00023
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "baseten",
+          "reasoning": "low",
+          "median_s": 1.35,
+          "best_s": 1.24,
+          "usd_per_call": 8e-05
+        }
       ],
-      "not_available": ["meta-llama/llama-4-scout on groq or cerebras via OpenRouter (HTTP 404, no endpoints)"]
+      "not_available": [
+        "meta-llama/llama-4-scout on groq or cerebras via OpenRouter (HTTP 404, no endpoints)"
+      ]
     },
     "strategy_call": {
       "what": "strategist update: ~2.6-4.1k-token prompt (knobs, player profile, history), JSON with knobs + strategy; 3 calls each",
       "script": "bench_strategy_call.py",
       "rows": [
-        {"model": "anthropic/claude-haiku-5.5", "provider": "default", "reasoning": "medium", "median_s": 6.14, "usd_per_call": 0.00077, "prompt_tokens": 4141},
-        {"model": "openai/gpt-oss-120b", "provider": "groq", "reasoning": "medium", "median_s": 4.59, "usd_per_call": 0.00139, "prompt_tokens": 2681},
-        {"model": "openai/gpt-oss-120b", "provider": "cerebras", "reasoning": "medium", "median_s": 2.11, "usd_per_call": 0.00222, "prompt_tokens": 2724},
-        {"model": "openai/gpt-oss-120b", "provider": "groq", "reasoning": "low", "median_s": 1.66, "usd_per_call": 0.00067, "prompt_tokens": 2598}
+        {
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "default",
+          "reasoning": "medium",
+          "median_s": 6.14,
+          "usd_per_call": 0.00077,
+          "prompt_tokens": 4141
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "medium",
+          "median_s": 4.59,
+          "usd_per_call": 0.00139,
+          "prompt_tokens": 2681
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "cerebras",
+          "reasoning": "medium",
+          "median_s": 2.11,
+          "usd_per_call": 0.00222,
+          "prompt_tokens": 2724
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "low",
+          "median_s": 1.66,
+          "usd_per_call": 0.00067,
+          "prompt_tokens": 2598
+        }
       ]
     },
     "tactician_call": {
       "what": "per-decision tactics: ~1k tokens in (rules + live board), throws JSON out; 5 calls each",
       "script": "bench_tactician_call.py",
       "rows": [
-        {"model": "openai/gpt-oss-20b", "provider": "groq", "reasoning": "low", "median_s": 0.63, "worst_of_5_s": 0.93, "output_tokens": 76, "reasoning_tokens": 20, "usd_per_call": 0.00012},
-        {"model": "openai/gpt-oss-120b", "provider": "cerebras", "reasoning": "low", "median_s": 0.63, "worst_of_5_s": 2.48, "output_tokens": 222, "reasoning_tokens": 172, "usd_per_call": 0.00065},
-        {"model": "openai/gpt-oss-120b", "provider": "groq", "reasoning": "low", "median_s": 0.83, "worst_of_5_s": 3.24, "output_tokens": 254, "reasoning_tokens": 184, "usd_per_call": 0.00032},
-        {"model": "openai/gpt-oss-120b", "provider": "groq", "reasoning": "unset (provider default)", "median_s": 3.32, "worst_of_5_s": 3.62, "output_tokens": 1176, "reasoning_tokens": 1129, "usd_per_call": 0.00090}
+        {
+          "model": "openai/gpt-oss-20b",
+          "provider": "groq",
+          "reasoning": "low",
+          "median_s": 0.63,
+          "worst_of_5_s": 0.93,
+          "output_tokens": 76,
+          "reasoning_tokens": 20,
+          "usd_per_call": 0.00012
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "cerebras",
+          "reasoning": "low",
+          "median_s": 0.63,
+          "worst_of_5_s": 2.48,
+          "output_tokens": 222,
+          "reasoning_tokens": 172,
+          "usd_per_call": 0.00065
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "low",
+          "median_s": 0.83,
+          "worst_of_5_s": 3.24,
+          "output_tokens": 254,
+          "reasoning_tokens": 184,
+          "usd_per_call": 0.00032
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "unset (provider default)",
+          "median_s": 3.32,
+          "worst_of_5_s": 3.62,
+          "output_tokens": 1176,
+          "reasoning_tokens": 1129,
+          "usd_per_call": 0.0009
+        }
       ]
     },
     "live_runs": {
       "what": "40 s wall-clock games, real-time 20 Hz loop, simple greedy bot as the player (dies often), one taunt at t=15 s",
       "rows": [
-        {"config": "strategist gpt-oss-120b@cerebras medium; tactician gpt-oss-120b@groq low; voice gpt-oss-120b@groq low",
-         "strategist_avg_s": 1.4, "tactician_avg_s": 1.6, "tactician_late_pct": 69, "voice_avg_s": 0.8, "deadline_s": 1.0, "calls": 15, "usd": 0.0097, "game_s": 29},
-        {"config": "strategist gpt-oss-120b@cerebras medium; tactician gpt-oss-20b@groq low; voice gpt-oss-120b@groq low (shipped default)",
-         "strategist_avg_s": 2.6, "tactician_avg_s": 1.0, "tactician_late_pct": 20, "voice_avg_s": 0.7, "deadline_s": 1.2, "calls": 16, "usd": 0.0093, "game_s": 28},
-        {"config": "earlier default: strategist + voice claude-haiku-5.5 (medium / none), no tactician; 45 s, 4 strategy calls",
-         "usd": 0.0028, "game_s": 45}
+        {
+          "config": "strategist gpt-oss-120b@cerebras medium; tactician gpt-oss-120b@groq low; voice gpt-oss-120b@groq low",
+          "strategist_avg_s": 1.4,
+          "tactician_avg_s": 1.6,
+          "tactician_late_pct": 69,
+          "voice_avg_s": 0.8,
+          "deadline_s": 1.0,
+          "calls": 15,
+          "usd": 0.0097,
+          "game_s": 29
+        },
+        {
+          "config": "strategist gpt-oss-120b@cerebras medium; tactician gpt-oss-20b@groq low; voice gpt-oss-120b@groq low (shipped default)",
+          "strategist_avg_s": 2.6,
+          "tactician_avg_s": 1.0,
+          "tactician_late_pct": 20,
+          "voice_avg_s": 0.7,
+          "deadline_s": 1.2,
+          "calls": 16,
+          "usd": 0.0093,
+          "game_s": 28
+        },
+        {
+          "config": "earlier default: strategist + voice claude-haiku-5.5 (medium / none), no tactician; 45 s, 4 strategy calls",
+          "usd": 0.0028,
+          "game_s": 45
+        }
+      ]
+    },
+    "local_ollama": {
+      "what": "same taunt-reply and tactician requests on this laptop: RTX 3060 Laptop GPU (6 GB), Ryzen 7 5800H, 14 GB RAM, Ollama 0.22, OpenAI-compatible endpoint, strict JSON schema; 1 cold call then 5 warm",
+      "script": "bench_local_ollama.py",
+      "rows": [
+        {
+          "model": "llama3.2:1b",
+          "task": "taunt",
+          "cold_s": 14.27,
+          "warm_median_s": 0.78,
+          "warm_worst_s": 1.13,
+          "valid": "6/6"
+        },
+        {
+          "model": "llama3.2:1b",
+          "task": "tactician",
+          "warm_median_s": 1.63,
+          "warm_worst_s": 2.45,
+          "valid": "6/6"
+        },
+        {
+          "model": "llama3.2:3b",
+          "task": "taunt",
+          "cold_s": 12.19,
+          "warm_median_s": 0.9,
+          "warm_worst_s": 1.03,
+          "valid": "6/6"
+        },
+        {
+          "model": "llama3.2:3b",
+          "task": "tactician",
+          "warm_median_s": 1.25,
+          "warm_worst_s": 2.19,
+          "valid": "6/6"
+        },
+        {
+          "model": "gemma:7b",
+          "task": "taunt",
+          "cold_s": 31.91,
+          "warm_median_s": 4.75,
+          "warm_worst_s": 5.22,
+          "valid": "6/6",
+          "note": "8.1 GB loaded, 5.2 GB in VRAM: part on CPU"
+        },
+        {
+          "model": "gemma:7b",
+          "task": "tactician",
+          "warm_median_s": 12.7,
+          "warm_worst_s": 15.27,
+          "valid": "6/6"
+        }
+      ],
+      "not_run": [
+        "Bonsai-1.7B Q1_0 (1-bit): fails to load in stock Ollama 0.22",
+        "gemma3:1b: needs a newer Ollama",
+        "gemma4 (9.6 GB): does not fit the 6 GB GPU; ~3 GB RAM free"
       ]
     }
   }

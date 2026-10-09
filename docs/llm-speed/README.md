@@ -11,3 +11,5 @@ draft and so the measurements can be repeated.
 
 Our samples are small (3-5 calls per row, one machine, one day): read them as orders of magnitude and
 tail-latency warnings, not as rankings.
+
+The article draft built on this data: [`docs/article/llm-real-time-game-2026-10.md`](../article/llm-real-time-game-2026-10.md).
