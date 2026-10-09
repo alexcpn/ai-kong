@@ -101,22 +101,25 @@ Two ideas carry over directly from AI Kong. First, the fast layer does not decod
 
 ## Can a local model on the laptop do it?
 
-Not on our test laptop: the best local model was slower than Groq in the cloud. Running locally removes the network round trip, but a small consumer GPU decodes more slowly than inference hardware built for it.
+Yes, for the fast layer. On a laptop RTX 3060 (6 GB) with Ollama 0.40, Gemma 4 E2B made a tactician decision in 0.51 s median (worst 0.76 s) and answered a taunt in 0.35 s. That matches gpt-oss-20b on Groq with a tighter tail, at no cost per call and with no network.
 
-| Model, run locally (RTX 3060 Laptop GPU, 6 GB, Ollama) | Taunt reply | Tactician call | Note |
+| Model on the local GPU (RTX 3060 Laptop, 6 GB, Ollama 0.40) | Taunt reply | Tactician call, median / worst | What it decided |
 | --- | --- | --- | --- |
-| Llama 3.2 1B | 0.78 s | 1.63 s (worst 2.45 s) | not faster than the 3B on the larger request |
-| Llama 3.2 3B | 0.90 s | 1.25 s (worst 2.19 s) | best local result |
-| Gemma 7B | 4.75 s | 12.7 s | 8.1 GB loaded, only 5.2 GB in video memory, the rest on the CPU |
-| gpt-oss-20b @ Groq, cloud, for comparison | ~0.4 s | 0.63 s (worst 0.93 s) | |
+| Gemma 4 E2B (4.6 GB) | 0.35 s | 0.51 s / 0.76 s | 1 to 3 throws, follows the plan, legal speeds; always puts Kong at the far right |
+| Gemma 3 1B (0.8 GB) | 0.22 s | 0.30 s / 2.8 s | no throws in 7 of 8 calls: fast because it does little |
+| Qwen 3.5 4B (3.3 GB) | 0.66 s | 1.36 s / 1.73 s | most varied; once picked a speed the level does not allow |
+| Llama 3.2 3B (2.0 GB) | 0.43 s | 0.4 to 1.9 s across runs | picks speeds the level does not allow |
+| gpt-oss-20b @ Groq, cloud, same hour | ~0.4 s | 0.6 to 1.05 s, single calls up to 3.2 s | 1 to 2 throws, follows the plan, legal speeds |
 
-All local replies were valid JSON under a strict schema, but each model took 12 to 32 s to load on its first call. Three were not run: Gemma 4 (9.6 GB) does not fit the GPU, the 1-bit Bonsai 1.7B needs its own runtime, and Gemma 3 1B needs a newer Ollama. Newer small models aimed at structured output, such as Qwen 3.5 4B and Gemma 4 E2B/E4B, are still to be tested.
+Three things decided the result. **Thinking off:** Gemma 4 and Qwen 3.5 reason by default, and Gemma 4 spent all 400 output tokens thinking and returned no JSON until the request set reasoning effort to none. **A clean GPU:** a leftover runner held 1.8 GB of video memory, and Qwen first loaded 71% on the CPU at 2 to 6 s per call. **The runtime:** updating Ollama from 0.22 to 0.40 cut Llama 3.2 3B's taunt reply from 0.90 s to 0.43 s.
 
-The robots above point to a better route than a smaller chat model. Helix's fast layer is not a general LLM but an 80M-parameter policy trained for one job. For AI Kong that means recording the tactician LLM's decisions and training a tiny model on them that runs inside the game in under a millisecond, with the LLM strategist kept on top.
+We checked what each model decided, not only how fast: 8 tactician calls on one level-1 board, with the strategist's plan to ambush climbs. Each model also takes 1 to 15 s to load on its first call, so it must be warmed up before play.
+
+So a small local model can run the fast layer below a second, the way Helix's System 1 runs on the robot, while the slow strategist stays in the cloud. For per-frame control the better route is still a tiny policy trained on the tactician's decisions, running inside the game in under a millisecond.
 
 ## Reproduce it
 
-The game, the director library and the benchmark scripts are in the AI Kong repository. The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](../llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](../llm-speed/) re-run each measurement through OpenRouter for well under a cent each. The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](../../.config/config.env).
+The game, the director library and the benchmark scripts are in the AI Kong repository. The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](../llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](../llm-speed/) re-run each measurement through OpenRouter for well under a cent each (`bench_local_ollama.py` and `bench_tactics_quality.py` cover the local GPU). The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](../../.config/config.env).
 
 ## Sources
 

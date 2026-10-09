@@ -392,6 +392,74 @@
         "Bonsai-1.7B Q1_0 (1-bit): fails to load in stock Ollama 0.22",
         "gemma3:1b: needs a newer Ollama",
         "gemma4 (9.6 GB): does not fit the 6 GB GPU; ~3 GB RAM free"
+      ],
+      "ollama_0_22_rows_above": true
+    },
+    "local_ollama_0_40": {
+      "what": "same laptop after updating Ollama to 0.40.2; thinking switched off (reasoning effort none); each model alone on the GPU (100% GPU); 1 cold + 5 warm calls for speed, 8 tactician calls for quality on one board (player on floor 0, level 1: max 3 throws, speeds slow/normal; strategist plan: ambush climbs with always-down barrels)",
+      "scripts": [
+        "bench_local_ollama.py",
+        "bench_tactics_quality.py"
+      ],
+      "rows": [
+        {
+          "model": "gemma4:e2b",
+          "size_gb": 4.6,
+          "taunt_median_s": 0.35,
+          "taunt_worst_s": 0.37,
+          "tactician_median_s": 0.51,
+          "tactician_worst_s": 0.76,
+          "quality": "1-3 throws per call, 9/10 'always' routes (follows the plan), all speeds legal; kong_x always 1.0"
+        },
+        {
+          "model": "gemma3:1b",
+          "size_gb": 0.8,
+          "taunt_median_s": 0.22,
+          "tactician_median_s": 0.3,
+          "tactician_worst_s": 2.83,
+          "quality": "0 throws in 7 of 8 calls; 1 of 6 taunt replies invalid"
+        },
+        {
+          "model": "qwen3.5:4b",
+          "size_gb": 3.3,
+          "taunt_median_s": 0.66,
+          "taunt_worst_s": 0.82,
+          "tactician_median_s": 1.36,
+          "tactician_worst_s": 1.73,
+          "quality": "0-2 throws, varied routes and kong_x, 1 illegal speed (fast on level 1)"
+        },
+        {
+          "model": "llama3.2:3b",
+          "taunt_median_s": 0.43,
+          "tactician_median_s": "0.37-1.89 across runs",
+          "quality": "mostly 0 throws in one run; 1 illegal speed"
+        },
+        {
+          "model": "llama3.2:1b",
+          "taunt_median_s": 0.14,
+          "tactician_median_s": 0.67,
+          "quality": "taunt reply e.g. '<fury>'; illegal speeds"
+        }
+      ],
+      "cloud_baseline_same_hour": [
+        {
+          "model": "openai/gpt-oss-20b",
+          "provider": "groq",
+          "reasoning": "low",
+          "tactician_median_s": 1.05,
+          "quality": "1-2 throws, 8/11 'always', legal"
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "reasoning": "low",
+          "tactician_median_s": 1.47,
+          "quality": "0-2 throws, legal"
+        }
+      ],
+      "notes": [
+        "Gemma 4 and Qwen 3.5 think by default; without reasoning effort 'none' Gemma 4 E2B spent all 400 output tokens thinking and returned no JSON",
+        "a stale Ollama runner held 1.8 GB of VRAM; Qwen first loaded 71% on CPU (2.3 s / 5-6.4 s) until all models were stopped"
       ]
     }
   }

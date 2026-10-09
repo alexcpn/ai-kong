@@ -47,7 +47,7 @@ class Layer:
     """One LLM role (e.g. strategist): which model, how much reasoning, how to constrain output."""
     name: str
     model: str = DEFAULT_MODEL
-    reasoning: str = "medium"      # none | low | medium | high
+    reasoning: str = "medium"      # none (send nothing) | off (ask the model not to think) | low | medium | high
     json_mode: str = "schema"      # schema (strict structured outputs) | object (plain JSON mode)
     max_tokens: int = 8000
     provider: str | None = None    # pin one OpenRouter provider for this layer (else the client's)
@@ -122,6 +122,8 @@ class LLMClient:
             body["messages"][0]["content"] += "\n\nReply with ONLY a JSON object matching: " + json.dumps(schema)
         if layer.reasoning in ("low", "medium", "high"):
             body["reasoning"] = {"effort": layer.reasoning, "exclude": True}
+        elif layer.reasoning == "off":            # thinking-by-default models (Gemma 4, Qwen 3.5) skip it
+            body["reasoning"] = {"effort": "none"}
         provider = layer.provider or self.provider
         if provider:
             body.setdefault("provider", {})["order"] = [provider]

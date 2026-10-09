@@ -24,7 +24,7 @@ for model in sys.argv[2:]:
     for task, system, prompt, schema, check in (("taunt", VOICE_SYSTEM, taunt, VOICE_SCHEMA, DirectorKong._valid_voice),
                                                  ("tactician", TACTICIAN_SYSTEM, tactics, TACTICIAN_SCHEMA, DirectorKong._valid_tactics)):
         for mode in ("schema", "object"):
-            layer = Layer(name=f"{model}-{task}", model=model, reasoning="none", json_mode=mode, max_tokens=400)
+            layer = Layer(name=f"{model}-{task}", model=model, reasoning="off", json_mode=mode, max_tokens=400)
             times, errors, sample = [], 0, None
             for i in range(6):                         # call 0 includes loading the model
                 t = time.monotonic()
