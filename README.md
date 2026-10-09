@@ -1,11 +1,33 @@
 # Donkey Kong, against a Kong that thinks
 
 A terminal Donkey Kong where Kong can be driven by an LLM that **studies how you play and re-plans
-its tactics**, without ever making the game lag. Pure Python standard library: no installs.
+its tactics**, without ever making the game lag. Pure Python standard library: no installs
+(`python-dotenv` is optional, to load settings from `.config/`).
+
+## Quick start
 
 ```bash
-python3 dk.py
+python3 dk.py                                      # menu: pick an opponent and a board
+
+# scripted Kongs, no key needed
+python3 dk.py --kong classic                       # arcade rhythm, the gentle start
+python3 dk.py --kong aim --board classic           # barrels aimed at your girder
+python3 dk.py --kong sniper --board tall           # broken timing, ladder ambushes, 6 girders
+python3 dk.py --kong trick --board sparse          # one ladder per girder, no escape routes
+python3 dk.py --kong random --seed 7               # same seed = same board, to practise a layout
+
+# the AI Director (needs an OpenRouter key, see below)
+python3 dk.py --kong director
+KONG_DIRECTOR_REASONING=high python3 dk.py --kong director --board tall
 ```
+
+Options: `--kong classic|random|aim|sniper|trick|director`, `--board random|classic|tall|sparse`,
+`--seed N`. Without `--kong` you get the menu.
+
+To configure the AI Director from files instead of the shell, put the key in
+`.config/opneroutere.env` (git-ignored; copy `.config/opneroutere.env.ex`) and settings in
+`.config/config.env`, then `pip install python-dotenv`. `dk.py` loads both at start-up, and
+variables already set in your shell take precedence.
 
 Use a terminal of at least 60 × 24 (60 × 28 for the Tall board). Pick an opponent and a board in the menu, then climb to Pauline (`|♀|`)
 at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the girders too.

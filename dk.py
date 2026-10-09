@@ -263,7 +263,26 @@ def run(win, args) -> None:
             return
 
 
+ENV_FILES = [os.path.join(HERE, ".config", "config.env"),          # model / reasoning / endpoint settings
+             os.path.join(HERE, ".config", "opneroutere.env")]     # API key (git-ignored)
+
+
+def load_env_files() -> None:
+    """Load .config/*.env into os.environ; variables already set in the shell win."""
+    present = [path for path in ENV_FILES if os.path.isfile(path)]
+    if not present:
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        print("note: pip install python-dotenv to load " + ", ".join(present), file=sys.stderr)
+        return
+    for path in present:
+        load_dotenv(path, override=False)
+
+
 def main() -> None:
+    load_env_files()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS], help="skip the menu and play this opponent")
     parser.add_argument("--board", choices=[b[0] for b in BOARDS], default="random")
