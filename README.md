@@ -171,5 +171,4 @@ typed knobs in any real-time game or simulation.
 python3 -m unittest discover .        # from the repo root: game + director library tests
 ```
 
-This game came out of DK-Bench, an experiment in benchmarking coding agents. That benchmark lives in a
-separate repository and embeds this one; you don't need it to play.
+This game came out of an experiment in benchmarking coding agents and evolved into this!
