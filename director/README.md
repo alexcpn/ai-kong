@@ -28,6 +28,14 @@ throwing (`dkgame/director_kong.py`).
 | "Make it harder" | Unwinnable spikes | **Fairness guard** simulates the change and vetoes it if a strong player could no longer survive |
 | Opaque behaviour | Players can't tell the AI is thinking | Every decision has a one-line **strategy**, reasons and an optional taunt to show on screen |
 
+## Commands: orders that aren't knobs
+
+Some decisions are structured orders rather than numbers, such as "send unit 2 to guard the bridge".
+Pass `commands=Commands(schema=..., apply=..., description=..., state=...)` to `Director`: the
+reply gains a `commands` field with your JSON schema, and `apply(value, t)` runs on the game thread
+(in `poll()` for background mode). It must validate and clamp the orders itself, and returns notes the
+LLM sees on its next update.
+
 ## Quick start
 
 ```python

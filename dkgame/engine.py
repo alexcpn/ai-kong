@@ -41,6 +41,18 @@ class Params:
     max_levels: int = 5              # clearing this many levels wins the episode
     kong_interval: float = 3.0       # Kong decides this often
     hit_rows: float = 0.55           # vertical distance that counts as touching
+    barrel_budget: int | None = None  # barrels Kong may throw per level (None = unlimited)
+    barrel_budget_per_level: int = 0  # extra barrels for each level after the first
+    anger_decay: float = 2.0          # anger (0-100) Kong loses per second while at the top
+    rampage_seconds: float = 9.0      # time an enraged Kong spends on the player's girder before going home
+    rampage_max_seconds: float = 25.0  # cap on the whole trip down
+    kong_walk_gap: float = 0.08       # seconds per column while Kong is down (the player walks at 0.075)
+    kong_climb_gap: float = 0.12      # seconds per row while Kong is on a ladder
+    rampage_throw_gap: float = 2.0    # Kong throws on the way down too, aimed at the player
+    kong_moves: bool = False          # Kong roams the girders above the player and throws from there
+    kong_floors_above: int = 2        # ...staying this many girders above the player (or at the top)
+    throw_gap_scale: float = 1.0      # < 1 lets Kong throw more often than the level's base pace
+    extra_barrels: int = 0            # more barrels on screen and per decision than the level's base
 
     def scaled(self, rng: random.Random, jitter: float) -> "Params":
         """A copy with physics/pacing jittered by up to +/- jitter (fraction)."""
@@ -108,12 +120,12 @@ CLASSIC_LAYOUT = Layout(width=56, floors=(17, 13, 9, 5, 1), x_min=2, x_max=53,
 def level_rules(level: int, params: Params) -> dict:
     """What Kong is allowed to do on a level. Difficulty rises with level."""
     return {
-        "max_barrels": min(9, 2 + level),
-        "min_throw_gap": round(max(0.7, 2.2 - 0.3 * (level - 1)), 2),
+        "max_barrels": min(9, 2 + level) + params.extra_barrels,
+        "min_throw_gap": round(max(0.7, 2.2 - 0.3 * (level - 1)) * params.throw_gap_scale, 2),
         "speeds": ["slow", "normal"] if level == 1 else ["slow", "normal", "fast"],
         "barrel_gap": round(max(0.08, params.barrel_gap - 0.008 * (level - 1)), 4),
         "fireballs": min(3, level - 1),
-        "max_throws_per_decision": min(4, 1 + level // 2),
+        "max_throws_per_decision": min(4, 1 + level // 2) + params.extra_barrels,
     }
 
 
@@ -166,6 +178,19 @@ class Player:
     invuln_until: float = 0.0
     next_walk: float = 0.0
     next_climb: float = 0.0
+
+
+@dataclass
+class KongBody:
+    x: int
+    floor: int
+    y: float
+    mode: str = "perch"           # perch (top, throwing) | rampage (hunting the player) | return
+    climb_to: int | None = None
+    step_at: float = 0.0
+    until: float = 0.0
+    next_throw: float = 0.0
+    arrived: bool = False         # reached the player's girder this rampage
 
 
 @dataclass
@@ -233,7 +258,9 @@ class Game:
         self.taunt = ""
         self.events: list[dict] = []
         self.stats = {"jumped_over": 0, "hits_barrel": 0, "hits_fireball": 0, "hits_timeout": 0,
-                      "stomps": 0, "climbs": 0}
+                      "stomps": 0, "climbs": 0, "kong_defeats": 0}
+        self.anger = 0.0
+        self._kong_beaten = False
         self.kong_errors = 0
         self.kong_strategy = ""
         self.plans = 0
@@ -260,8 +287,19 @@ class Game:
     def rules(self) -> dict:
         return level_rules(self.level, self.params)
 
+    @property
+    def level_budget(self) -> int | None:
+        prm = self.params
+        if prm.barrel_budget is None:
+            return None
+        return prm.barrel_budget + prm.barrel_budget_per_level * (self.level - 1)
+
     def _start_level(self) -> None:
         lay = self.layout
+        self.barrels_left = self.level_budget      # refilled per level, not per life
+        self.anger = 0.0
+        self.kong_body = KongBody(x=lay.x_min + 1, floor=lay.top, y=float(lay.floors[lay.top]))
+        self.kong_aim, self._kong_directed, self._sway = 0.0, False, 0   # aim: 0 = left .. 1 = right
         self.player = Player(x=lay.x_min + 2, y=float(lay.floors[0]), floor=0,
                              invuln_until=self.t + self.params.invuln_time)
         self.highest = 0
@@ -276,9 +314,9 @@ class Game:
 
     def _respawn(self) -> None:
         """After losing a life: same level, fresh positions and hazards, timer restarted."""
-        level_events = self.events
+        keep = (self.events, self.barrels_left, self.anger, self.kong_aim, self._kong_directed)
         self._start_level()
-        self.events = level_events
+        self.events, self.barrels_left, self.anger, self.kong_aim, self._kong_directed = keep
 
     def _spawn_fireball(self) -> None:
         lay = self.layout
@@ -310,6 +348,10 @@ class Game:
             "goal_x": self.layout.goal_x,
             "ladders": [{"x": x, "bottom_floor": b} for x, b in self.layout.ladders],
             "barrels_on_board": len(self.barrels) + len(self.queue),
+            "barrels_left": self.barrels_left,          # None = unlimited
+            "barrel_budget": self.level_budget,
+            "kong": {"anger": round(self.anger), "mode": self.kong_body.mode, "floor": self.kong_body.floor,
+                     "x": self.kong_body.x},
             "rules": rules,
             "interval": self.params.kong_interval,
             "recent_events": self.events[-12:],
@@ -370,6 +412,9 @@ class Game:
             route = item.get("route") if item.get("route") in ROUTES else "random"
             self.queue.append(Throw(at=self.t + delay, speed=speed, route=route, plan=self.plans))
         self.queue.sort(key=lambda q: q.at)
+        move_to = plan.get("move_to") if isinstance(plan, dict) else None
+        if self.params.kong_moves and isinstance(move_to, (int, float)) and not isinstance(move_to, bool):
+            self.kong_aim, self._kong_directed = min(1.0, max(0.0, float(move_to))), True
         taunt = plan.get("taunt") if isinstance(plan, dict) else ""
         if isinstance(taunt, str) and taunt.strip():
             self.taunt = " ".join(taunt.split())[:70]
@@ -380,7 +425,13 @@ class Game:
 
     def _release_throws(self) -> None:
         rules = self.rules
+        if self.kong_body.mode != "perch":
+            self.queue.clear()             # Kong is away from his barrel pile
+            return
         while self.queue and self.queue[0].at <= self.t:
+            if self.barrels_left is not None and self.barrels_left <= 0:
+                self.queue.clear()         # out of barrels until the next level
+                break
             if len(self.barrels) >= rules["max_barrels"]:
                 q = self.queue.pop(0)      # no room: Kong wasted the throw
                 self._log_barrel(None, q, "wasted (board full)")
@@ -389,15 +440,23 @@ class Game:
                 self.queue[0].at = self.last_throw + rules["min_throw_gap"]
                 self.queue.sort(key=lambda q: q.at)
                 break
+            lay, k = self.layout, self.kong_body
+            if self.params.kong_moves and k.climb_to is not None:
+                break                      # can't throw from a ladder; wait until he is on a girder
             q = self.queue.pop(0)
-            lay = self.layout
             gap = rules["barrel_gap"] * SPEED_FACTORS[q.speed]
-            barrel = Barrel(id=self._id(), x=lay.spawn_x, floor=lay.top, y=float(lay.floors[lay.top]),
-                            direction=1, step_gap=gap, route=q.route, step_at=self.t + gap,
+            x, direction, floor = lay.spawn_x, 1, lay.top
+            if self.params.kong_moves:                 # from wherever Kong stands, rolled toward the player
+                direction = 1 if self.player.x >= k.x else -1
+                x, floor = min(lay.x_max, max(lay.x_min, k.x + direction)), k.floor
+            barrel = Barrel(id=self._id(), x=x, floor=floor, y=float(lay.floors[floor]),
+                            direction=direction, step_gap=gap, route=q.route, step_at=self.t + gap,
                             thrown_at=self.t, speed_name=q.speed)
             self.barrels.append(barrel)
             self._log_barrel(barrel.id, q, None)
             self.last_throw = self.t
+            if self.barrels_left is not None:
+                self.barrels_left -= 1
             self._event("throw", speed=q.speed, route=q.route)
 
     def _log_barrel(self, ident, q: Throw, outcome) -> None:
@@ -412,6 +471,130 @@ class Game:
                 if entry["outcome"] is None:
                     entry["outcome"] = outcome
                 return
+
+    # ----------------------------------------------------------------- Kong's temper
+
+    def provoke(self, amount: float, charge: bool = False) -> None:
+        """The player taunted Kong. At full anger (or if he takes the bait) he comes down after them."""
+        k = self.kong_body
+        self.anger = min(100.0, self.anger + amount)
+        self._event("provoked", anger=round(self.anger))
+        if (charge or self.anger >= 100) and k.mode == "perch":
+            k.mode, k.until, k.step_at, k.next_throw = "rampage", self.t + self.params.rampage_max_seconds, self.t, self.t + 0.8
+            k.arrived = False
+            self.anger = 100.0
+            self.taunt = "RAAAARGH!!"
+            self._event("kong_rampage")
+        elif amount > 0 and k.mode == "perch":
+            self.taunt = "GRRRR!" if self.anger >= 50 else "Hmph."
+
+    def kong_range(self, floor: int) -> tuple[int, int]:
+        """Where Kong may stand on a girder (on the top one, not within a few columns of Pauline)."""
+        lay = self.layout
+        lo = lay.x_min + 1
+        return (lo, max(lo, lay.goal_x - 5)) if floor == lay.top else (lo, lay.x_max - 1)
+
+    def roam_floor(self) -> int:
+        """The girder Kong keeps to when he is not storming: a few above the player, or the top."""
+        if not self.params.kong_moves:
+            return self.layout.top
+        return min(self.layout.top, self.player.floor + self.params.kong_floors_above)
+
+    def _aim_x(self, floor: int) -> int:
+        lo, hi = self.kong_range(floor)
+        return round(lo + self.kong_aim * (hi - lo))
+
+    def _path_step(self, e, goal_floor: int, climb_gap: float, walk_gap: float) -> bool:
+        """One step of Kong toward goal_floor over girders and ladders.
+        Returns True when e already stands on goal_floor (the caller then moves it along the girder)."""
+        lay = self.layout
+        if e.climb_to is not None:
+            e.step_at = self.t + climb_gap
+            target = lay.floors[e.climb_to]
+            e.y += 1.0 if target > e.y else -1.0
+            if abs(e.y - target) < 1e-9:
+                e.y, e.floor, e.climb_to = float(target), e.climb_to, None
+            return False
+        e.step_at = self.t + walk_gap
+        if e.floor == goal_floor:
+            return True
+        down = goal_floor < e.floor                      # head for the nearest ladder the right way
+        ladders = [x for x, b in lay.ladders if b == (e.floor - 1 if down else e.floor)]
+        if ladders:
+            lx = min(ladders, key=lambda x: abs(x - e.x))
+            if lx == e.x:
+                e.climb_to = e.floor - 1 if down else e.floor + 1
+            else:
+                e.x += 1 if lx > e.x else -1
+        return False
+
+    def _pace(self) -> None:
+        """Kong not storming: keep to his girder above the player, walk to where his strategy wants
+        him, shifting about a little."""
+        k, prm = self.kong_body, self.params
+        if self.t + 1e-9 < k.step_at:
+            return
+        if not self._path_step(k, self.roam_floor(), prm.kong_climb_gap, prm.kong_walk_gap):
+            return                                       # still changing girders
+        k.step_at = self.t + prm.kong_walk_gap * 2.5
+        lo, hi = self.kong_range(k.floor)
+        aim = min(hi, max(lo, self._aim_x(k.floor) + self._sway))
+        if k.x != aim:
+            k.x += 1 if aim > k.x else -1
+        elif self.rng.random() < 0.25:
+            self._sway = self.rng.randint(-3, 3)
+            if not self._kong_directed and self.rng.random() < 0.3:   # nobody directs him: roam
+                self.kong_aim = self.rng.random()
+
+    def _update_kong(self) -> None:
+        k, lay, p, prm = self.kong_body, self.layout, self.player, self.params
+        if k.mode == "perch":
+            self.anger = max(0.0, self.anger - prm.anger_decay * TICK)
+            if prm.kong_moves:
+                self._pace()
+            return
+        if k.mode == "rampage" and self.t >= k.until:
+            k.mode = "return"
+        if self.t + 1e-9 < k.step_at:
+            return
+        home_floor = self.roam_floor()
+        home = self._aim_x(home_floor)
+        goal_floor, goal_x = (home_floor, home) if k.mode == "return" else (p.floor, p.x)
+        if k.mode == "rampage" and k.climb_to is None:
+            if k.floor == goal_floor and not k.arrived:
+                k.arrived, k.until = True, min(k.until, self.t + prm.rampage_seconds)
+            if self.t >= k.next_throw and p.mode != "climb":
+                k.next_throw = self.t + prm.rampage_throw_gap
+                self._kong_throw(1 if p.x > k.x else -1)
+        if not self._path_step(k, goal_floor, prm.kong_climb_gap, prm.kong_walk_gap):
+            return
+        if k.mode == "return":
+            if k.x == home:
+                k.mode = "perch"
+                self.anger = min(self.anger, 40.0)
+            else:
+                k.x += 1 if home > k.x else -1
+            return
+        dx = goal_x - k.x                                # same girder: keep a throwing distance
+        toward = 1 if dx > 0 else -1
+        if abs(dx) > 9:
+            k.x += toward
+        elif abs(dx) < 5 and lay.x_min + 1 <= k.x - toward <= lay.x_max - 1:
+            k.x -= toward
+
+    def _kong_throw(self, direction: int) -> None:
+        """A point-blank barrel from wherever Kong is standing."""
+        if (self.barrels_left is not None and self.barrels_left <= 0) or len(self.barrels) >= self.rules["max_barrels"]:
+            return
+        k = self.kong_body
+        gap = self.rules["barrel_gap"]
+        barrel = Barrel(id=self._id(), x=k.x + direction, floor=k.floor, y=k.y, direction=direction, step_gap=gap,
+                        route="toward_player", step_at=self.t + gap, thrown_at=self.t)
+        self.barrels.append(barrel)
+        self._log_barrel(barrel.id, Throw(at=self.t, speed="normal", route="toward_player"), None)
+        if self.barrels_left is not None:
+            self.barrels_left -= 1
+        self._event("throw", speed="normal", route="point_blank")
 
     # ----------------------------------------------------------------- player
 
@@ -599,6 +782,13 @@ class Game:
 
     def _collide(self, prev_mode: str, prev_vy: float, prev_y: float) -> None:
         p, prm = self.player, self.params
+        k = self.kong_body
+        off_top = k.mode != "perch" or k.floor != self.layout.top or k.climb_to is not None
+        if off_top and abs(k.x - p.x) <= 1 and k.y - 1.0 - 1e-9 <= p.y <= k.y + 0.5:
+            self.stats["kong_defeats"] += 1              # caught him away from his top girder
+            self._event("kong_defeated", floor=k.floor, x=k.x)
+            self._kong_beaten = True
+            return
         for b in self.barrels:
             if b.x == p.x and not b.passed_player and p.mode == "air" and b.y - p.y >= prm.hit_rows \
                     and abs(b.floor - p.floor) == 0:
@@ -640,7 +830,9 @@ class Game:
 
     def _check_goal(self) -> None:
         p = self.player
-        if p.mode == "ground" and p.floor == self.layout.top and abs(p.x - self.layout.goal_x) <= 1:
+        reached = p.mode == "ground" and p.floor == self.layout.top and abs(p.x - self.layout.goal_x) <= 1
+        if reached or self._kong_beaten:
+            self._kong_beaten = False
             self.levels_cleared += 1
             for b in self.barrels:
                 self._outcome(b.id, "removed when the player cleared the level")
@@ -689,6 +881,7 @@ class Game:
         self._release_throws()
         self._update_barrels()
         self._update_fireballs()
+        self._update_kong()
         self._collide(*prev)
         if self.over:
             return
@@ -717,7 +910,9 @@ class Game:
             "fireballs": [{"id": f.id, "x": f.x, "y": round(f.y, 4), "floor": f.floor, "dir": f.direction,
                            "climbing": f.climbing} for f in self.fireballs],
             "kong": {"taunt": self.taunt, "next_decision_in": round(max(0.0, self.next_decision - self.t), 2),
-                     "queued_throws": len(self.queue)},
+                     "queued_throws": len(self.queue), "barrels_left": self.barrels_left,
+                     "anger": round(self.anger, 1), "mode": self.kong_body.mode, "x": self.kong_body.x,
+                     "y": round(self.kong_body.y, 4), "floor": self.kong_body.floor},
             "rules": self.rules,
         }
 

@@ -42,7 +42,7 @@ def centre(win, y: int, text: str, attr: int = 0) -> None:
 
 
 def needed_size(layout: dict) -> tuple[int, int]:
-    return layout["floors"][0] + 6, layout["width"] + 2
+    return layout["floors"][0] + 7, layout["width"] + 2
 
 
 def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
@@ -57,11 +57,15 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
         return
     left = max(0, (w - layout["width"]) // 2)
     p = s["player"]
+    left_n = s.get("kong", {}).get("barrels_left")
+    barrels = f"  ●×{left_n:02d}" if left_n is not None else f"  vs {hud['opponent']}"
     put(win, 0, left, f"SCORE {hud['score']:06d}  BEST {hud['best']:06d}  LV {s['level']:02d}  "
-                      f"{'♥' * s['lives']}  TIME {int(s['time_left']):02d}  vs {hud['opponent']}",
+                      f"{'♥' * s['lives']}  TIME {int(s['time_left']):02d}{barrels}",
         c("ui") | curses.A_BOLD)
     taunt = s.get("kong", {}).get("taunt") or ""
-    if taunt:
+    if hud.get("said"):
+        put(win, 1, left, f'YOU: "{hud["said"]}"'[: layout["width"]], c("player") | curses.A_BOLD)
+    elif taunt:
         put(win, 1, left, f'KONG: "{taunt}"'[: layout["width"]], c("danger") | curses.A_BOLD)
     oy = 2
     floors = layout["floors"]
@@ -73,8 +77,12 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
         for row in range(floors[lad["top_floor"]] + 1, floors[lad["bottom_floor"]] + 1):
             put(win, oy + row, left + lad["x"], "H", c("ladder") | curses.A_BOLD)
     top = floors[-1]
-    put(win, oy + top - 1, left + layout["x_min"], "▐█▌", c("danger") | curses.A_BOLD)
-    put(win, oy + top, left + layout["x_min"], " ▀ ", c("danger") | curses.A_BOLD)
+    kong = s.get("kong", {})
+    kx, ky = kong.get("x", layout["x_min"] + 1), int(kong.get("y", top) + 0.5)
+    loose = kong.get("mode", "perch") != "perch"
+    look = c("danger") | curses.A_BOLD | (curses.A_REVERSE if loose else 0)
+    put(win, oy + ky - 1, left + kx - 1, "▐█▌", look)
+    put(win, oy + ky, left + kx - 1, "/▀\\" if loose else " ▀ ", look)
     put(win, oy + top - 1, left + layout["goal"]["x"] - 1, " O ", c("goal") | curses.A_BOLD)
     put(win, oy + top, left + layout["goal"]["x"] - 1, "|♀|", c("goal") | curses.A_BOLD)
     for b in s["barrels"]:
@@ -88,7 +96,13 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     bottom = oy + floors[0] + 2
     if hud.get("plan"):
         put(win, bottom, left, f"Kong's plan: {hud['plan']}"[: layout["width"]], c("goal"))
-    put(win, bottom + 1, left, "←→/AD move  ↑↓/WS climb  SPACE jump  P pause  Q quit", c("ui"))
+    if hud.get("controls"):
+        put(win, bottom + 1, left, hud["controls"], c("goal") | curses.A_BOLD)
+    else:
+        put(win, bottom + 1, left, "←→/AD move  ↑↓/WS climb  SPACE jump  H agent  P pause  Q quit", c("ui"))
+    if hud.get("footer"):
+        put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)],
+            c("player") | curses.A_BOLD if hud["footer"].startswith("TAUNT") else c("ui"))
     if hud.get("banner"):
         centre(win, oy + floors[0] // 2, hud["banner"], c("ui") | curses.A_REVERSE | curses.A_BOLD)
     win.refresh()

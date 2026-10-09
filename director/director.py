@@ -1,12 +1,13 @@
 """The director: a slow LLM that reasons about the player and sets a fast game's knobs.
 
     game (every tick) ── profile + outcomes ──► Director.update()   (every N s or on a trigger)
-       ▲                                           │ LLM: {opponent_model, strategy, reasons, taunt, knobs}
-       └──── KnobSet.apply ◄── guard ◄── KnobSet.validate
+       ▲                                           │ LLM: {opponent_model, strategy, reasons, taunt, knobs,
+       └──── KnobSet.apply ◄── guard ◄── KnobSet.validate      commands?}
 
 The LLM never acts on the game directly. It only proposes knob values, which are validated
 (bounds, max step, cooldown), checked by an optional fairness guard, and applied by the game's own
-deterministic code. In background mode the LLM call runs in a thread, so a real-time game never
+deterministic code. Optional Commands carry structured orders that are not knobs (e.g. "send unit 2
+to guard the bridge"); the game validates and applies them on its own thread. In background mode the LLM call runs in a thread, so a real-time game never
 waits for it; results are applied on the game's next poll().
 """
 
@@ -15,7 +16,7 @@ from __future__ import annotations
 import concurrent.futures as cf
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .guard import FeasibilityGuard
 from .knobs import KnobSet
@@ -41,6 +42,16 @@ sentences), taunt (<= 60 characters, playful and family-friendly, may be empty),
 
 
 @dataclass
+class Commands:
+    """Structured orders beside the knobs. apply(value, t) runs on the game's thread (in poll() for
+    background mode); it must validate and clamp, and returns notes for the LLM's next update."""
+    schema: dict
+    apply: Callable[[Any, float], list]
+    description: str = ""
+    state: Callable[[], Any] | None = None     # what the LLM should know about the current orders
+
+
+@dataclass
 class Decision:
     t: float
     trigger: str
@@ -55,8 +66,9 @@ class Decision:
 class Director:
     def __init__(self, knobs: KnobSet, brief: str, layer: Layer | None = None, client: Any = None,
                  every_s: float = 20.0, guard: FeasibilityGuard | None = None, background: bool = False,
-                 max_history: int = 6, system: str = DIRECTOR_SYSTEM) -> None:
+                 max_history: int = 6, system: str = DIRECTOR_SYSTEM, commands: Commands | None = None) -> None:
         self.knobs = knobs
+        self.commands = commands
         self.brief = brief
         self.system = system
         self.layer = layer or Layer(name="director")
@@ -102,6 +114,9 @@ class Director:
             "notes_from_your_last_update": self._last_notes,
             "why_you_are_consulted_now": trigger,
         }
+        if self.commands is not None:
+            prompt["commands"] = {"how": self.commands.description,
+                                  "current": self.commands.state() if self.commands.state else None}
         if self.background:
             self._job = self._pool.submit(self._think, t, trigger, prompt, snapshot)
         else:
@@ -128,10 +143,11 @@ class Director:
         self._last_outcomes = dict(outcomes)
 
     def schema(self) -> dict:
-        return {"type": "object", "properties": {
-            "opponent_model": {"type": "string"}, "strategy": {"type": "string"},
-            "reasons": {"type": "string"}, "taunt": {"type": "string"}, "knobs": self.knobs.json_schema()},
-            "required": ["opponent_model", "strategy", "reasons", "taunt", "knobs"], "additionalProperties": False}
+        props = {"opponent_model": {"type": "string"}, "strategy": {"type": "string"},
+                 "reasons": {"type": "string"}, "taunt": {"type": "string"}, "knobs": self.knobs.json_schema()}
+        if self.commands is not None:
+            props["commands"] = self.commands.schema
+        return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
     @staticmethod
     def _validate(reply) -> dict:
@@ -180,6 +196,11 @@ class Director:
             if taunt:
                 self.taunt = taunt
             self.knobs.apply(decision.changes, decision.t, reason=reply.get("reasons", "")[:300])
+            if self.commands is not None and "commands" in reply:
+                try:
+                    self._last_notes = list(decision.notes) + list(self.commands.apply(reply["commands"], decision.t))
+                except Exception as exc:  # a bad order must never break the game
+                    self._last_notes = list(decision.notes) + [f"commands rejected: {str(exc)[:120]}"]
 
     def summary(self) -> dict:
         return {

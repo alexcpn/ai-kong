@@ -97,5 +97,239 @@ class SetupTests(unittest.TestCase):
                 del os.environ["XDG_CACHE_HOME"]
 
 
+class Spray(Kong):
+    """Throws as often as the rules allow."""
+    name = "spray"
+
+    def plan(self, obs):
+        return {"throws": [{"delay": 0.0, "speed": "slow", "route": "never"}] * 4}
+
+
+class BudgetTests(unittest.TestCase):
+    def test_kong_runs_out_and_refills_per_level_not_per_life(self):
+        from dataclasses import replace
+        layout, params = dk.make_variant("classic", 1)
+        params = replace(params, barrel_budget=8)
+        game = Game(layout, params, Spray(), seed=1)
+        game.player.invuln_until = 1e9
+        budget = game.barrels_left
+        self.assertEqual(game.kong_observation()["barrels_left"], budget)
+        for _ in range(4000):
+            game.step(())
+            if game.barrels_left == 0:
+                break
+        self.assertEqual(game.barrels_left, 0)
+        thrown = sum(1 for e in game.events if e["event"] == "throw")
+        for _ in range(400):                       # nothing more once the supply is gone
+            game.step(())
+        self.assertEqual(sum(1 for e in game.events if e["event"] == "throw"), thrown)
+        game._respawn()
+        self.assertEqual(game.barrels_left, 0)
+        game.level += 1
+        game._start_level()
+        self.assertEqual(game.barrels_left, budget + params.barrel_budget_per_level)
+
+    def test_engine_default_is_unlimited(self):
+        layout, _ = dk.make_variant("classic", 1)
+        game = Game(layout, dk.Params(), Spray(), seed=1)
+        self.assertIsNone(game.barrels_left)
+        for _ in range(200):
+            game.step(())
+        self.assertIsNone(game.barrels_left)
+
+
+class TauntTests(unittest.TestCase):
+    def make(self, charge):
+        from dkgame.director_kong import DEFAULT_KNOBS, DirectorKong
+
+        prompts = []
+
+        class Stub:
+            def ask(self, layer, system, prompt, schema, validate):
+                prompts.append(prompt)
+                if "say" in schema["properties"]:                       # the fast voice call
+                    return validate({"say": "Ladders are my thing.", "charge": charge})
+                return validate({"opponent_model": "", "strategy": "s", "reasons": "", "taunt": "",
+                                 "knobs": dict(DEFAULT_KNOBS)})
+
+            def total_usage(self):
+                return {}
+
+        layout, params = dk.make_variant("classic", 2)
+        kong = DirectorKong(background=True, client=Stub(), guard=False)
+        game = Game(layout, params, kong, seed=2)
+        kong.attach(game)
+        for _ in range(40):
+            game.step(())
+        return game, kong, prompts
+
+    def taunt_and_wait(self, game, kong):
+        import time
+        game.provoke(dk.TAUNT_ANGER)
+        self.assertIn(game.taunt, ("Hmph.", "GRRRR!"))                # instant grunt
+        kong.provoke(dk.TAUNTS[3], game.t)
+        deadline = time.monotonic() + 5
+        while game.taunt != "Ladders are my thing." and time.monotonic() < deadline:
+            game.step(())
+            time.sleep(0.002)
+        self.assertEqual(game.taunt, "Ladders are my thing.")
+
+    def test_voice_answers_without_charging(self):
+        game, kong, prompts = self.make(charge=False)
+        self.taunt_and_wait(game, kong)
+        voice = [p for p in prompts if "player_says" in p][-1]
+        self.assertEqual(voice["player_says"], dk.TAUNTS[3])
+        self.assertEqual(game.kong_body.mode, "perch")
+
+    def test_taking_the_bait_sends_kong_down(self):
+        game, kong, _ = self.make(charge=True)
+        self.taunt_and_wait(game, kong)
+        self.assertEqual(game.kong_body.mode, "rampage")
+
+
+class TemperTests(unittest.TestCase):
+    def game(self):
+        layout, params = dk.make_variant("classic", 4)
+        game = Game(layout, params, Quiet(), seed=4)
+        game.player.invuln_until = 1e9
+        return game
+
+    def test_three_quick_taunts_start_a_rampage_and_anger_cools(self):
+        game = self.game()
+        game.provoke(dk.TAUNT_ANGER)
+        for _ in range(40):
+            game.step(())
+        self.assertLess(game.anger, dk.TAUNT_ANGER)                   # cools while he sits
+        game.provoke(dk.TAUNT_ANGER)
+        self.assertEqual(game.kong_body.mode, "perch")
+        game.provoke(dk.TAUNT_ANGER)
+        self.assertEqual(game.kong_body.mode, "rampage")
+
+    def test_rampaging_kong_comes_down_then_goes_home(self):
+        game = self.game()
+        game.provoke(0, charge=True)
+        lowest = game.kong_body.floor
+        for _ in range(int(game.params.rampage_seconds / 0.05)):
+            game.step(())
+            lowest = min(lowest, game.kong_body.floor)
+        self.assertLess(lowest, game.layout.top)
+        for _ in range(2000):
+            game.step(())
+            if game.kong_body.mode == "perch":
+                break
+        self.assertEqual(game.kong_body.mode, "perch")
+        self.assertEqual(game.kong_body.floor, game.roam_floor())
+
+    def test_touching_kong_off_his_perch_beats_the_level(self):
+        game = self.game()
+        scorer = dk.Scorer()
+        game.provoke(0, charge=True)
+        k = game.kong_body
+        k.floor, k.y, k.x = game.player.floor, game.player.y, game.player.x
+        game.step(())
+        scorer.update(game)
+        self.assertEqual(game.stats["kong_defeats"], 1)
+        self.assertEqual(game.levels_cleared, 1)
+        self.assertEqual(game.kong_body.mode, "perch")                 # fresh level
+        self.assertGreaterEqual(scorer.score, dk.POINTS["kong"])
+
+    def test_touching_kong_on_the_top_girder_does_nothing(self):
+        game = self.game()
+        p, k, top = game.player, game.kong_body, game.layout.top
+        p.floor, p.y = top, float(game.layout.floors[top])
+        k.floor, k.y, k.x, k.step_at = top, p.y, p.x, 1e9
+        game.step(())
+        self.assertEqual(game.stats["kong_defeats"], 0)
+
+
+class KongMovesTests(unittest.TestCase):
+    def test_kong_walks_where_told_and_throws_from_there(self):
+        layout, params = dk.make_variant("classic", 1)
+
+        class Mover(Spray):
+            def plan(self, obs):
+                return {**super().plan(obs), "move_to": 1.0}
+
+        game = Game(layout, params, Mover(), seed=1)
+        game.player.invuln_until = 1e9
+        for _ in range(600):
+            game.step(())
+        lo, hi = game.kong_range(game.kong_body.floor)
+        self.assertGreater(game.kong_body.x, hi - 5)
+        self.assertTrue([b for b in game.barrel_log if b["id"] is not None])
+        self.assertTrue(any(e["event"] == "throw" for e in game.events))
+
+    def test_kong_keeps_a_few_girders_above_the_player(self):
+        from dataclasses import replace
+        layout, params = dk.make_variant("classic", 1)
+        params = replace(params, level_seconds=999)
+        game = Game(layout, params, Quiet(), seed=1)
+        game.player.invuln_until = 1e9
+        for _ in range(400):
+            game.step(())
+        self.assertEqual(game.kong_body.floor, params.kong_floors_above)       # player on floor 0
+        p = game.player
+        p.floor, p.y = 1, float(layout.floors[1])                              # player gets a girder higher
+        for _ in range(600):
+            game.step(())
+        self.assertEqual(game.kong_body.floor, 1 + params.kong_floors_above)
+        p.floor, p.y, p.x = 3, float(layout.floors[3]), layout.x_max - 1        # well away from Kong
+        for _ in range(600):
+            game.step(())
+        self.assertEqual(game.kong_body.floor, layout.top)                     # never above the top
+        self.assertEqual(game.stats["kong_defeats"], 0)
+
+    def test_barrels_start_from_kongs_girder(self):
+        layout, params = dk.make_variant("classic", 1)
+        game = Game(layout, params, Spray(), seed=1)
+        game.player.invuln_until = 1e9
+        floors = set()
+        for _ in range(800):
+            game.step(())
+            for b in game.barrels:
+                if b.thrown_at == game.t - 0.05 or abs(b.thrown_at - game.t) < 1e-9:
+                    floors.add(b.floor)
+        self.assertIn(params.kong_floors_above, floors)
+
+    def test_undirected_kong_roams(self):
+        layout, params = dk.make_variant("classic", 1)
+        game = Game(layout, params, Quiet(), seed=3)
+        xs = set()
+        for _ in range(1200):
+            game.step(())
+            xs.add(game.kong_body.x)
+        self.assertGreater(len(xs), 6)
+
+
+class AgentTests(unittest.TestCase):
+    def test_agent_can_play_against_a_live_ai_kong(self):
+        import time
+        from dkgame.director_kong import DEFAULT_KNOBS, DirectorKong, playable_copy
+        from dkgame.lookahead import LookaheadPlayer
+
+        class Stub:
+            def ask(self, layer, system, prompt, schema, validate):
+                return validate({"opponent_model": "", "strategy": "s", "reasons": "", "taunt": "",
+                                 "knobs": dict(DEFAULT_KNOBS)})
+
+            def total_usage(self):
+                return {}
+
+        layout, params = dk.make_variant("classic", 8)
+        kong = DirectorKong(background=True, client=Stub(), guard=False)
+        game = Game(layout, params, kong, seed=8)
+        kong.attach(game)
+        agent = LookaheadPlayer(copy_game=playable_copy)
+        worst = 0.0
+        for _ in range(400):
+            started = time.perf_counter()
+            keys = agent.act(game)
+            worst = max(worst, time.perf_counter() - started)
+            game.step(keys)
+        self.assertGreater(game.highest + game.levels_cleared, 0)            # it made progress
+        self.assertIs(game.kong, kong)                                         # the live Kong was never replaced
+        self.assertLess(worst, 0.25)
+
+
 if __name__ == "__main__":
     unittest.main()

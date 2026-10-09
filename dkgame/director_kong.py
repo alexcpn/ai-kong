@@ -3,11 +3,13 @@
 ParametricKong is a deterministic Kong whose behaviour is fully set by a handful of knobs.
 DirectorKong lets an LLM director (director/) turn those knobs from a profile of the player,
 with a fairness guard that vetoes settings even an omniscient player could not survive.
-No engine changes: plans go through the same {"throws": [...]} interface as every Kong.
+Plans go through the same {"throws": [...]} interface as every Kong. Player taunts get a separate,
+fast "voice" call (no reasoning) so Kong answers in a second or two and may charge down at once.
 """
 
 from __future__ import annotations
 
+import concurrent.futures as cf
 import copy
 import os
 import random
@@ -15,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # dk-game/, for director
 
-from director import Director, FeasibilityGuard, KnobSet, KnobSpec, Layer  # noqa: E402
+from director import Director, FeasibilityGuard, KnobSet, KnobSpec, Layer, LLMError  # noqa: E402
 
 from .engine import TICK, Kong  # noqa: E402
 from .llm_kong import MECHANICS  # noqa: E402
@@ -40,6 +42,10 @@ KNOB_SPECS = [
              description="0 = metronome-regular throws (easy to learn), 1 = irregular timing"),
     KnobSpec("hold_back_s", "float", 0.0, min=0.0, max=6.0, max_step=6.0, cooldown_s=10.0,
              description="right after this update, throw nothing for this many seconds (a lull before a strike)"),
+    KnobSpec("kong_x", "float", 0.1, min=0.0, max=1.0, max_step=1.0,
+             description="where Kong stands along his girder (0 = left end, 1 = right end; on the top girder he "
+                         "stays a few columns short of Pauline). Barrels start where he stands and roll toward "
+                         "the player: stand above a ladder they need. Ignored if Kong can't move"),
 ]
 DEFAULT_KNOBS = KnobSet(KNOB_SPECS).snapshot()
 
@@ -47,7 +53,35 @@ BRIEF = MECHANICS + """
 
 YOU DIRECT KONG. Your goal is to stop the player from reaching the goal, by out-thinking them, not by
 flooding the board (the fairness guard vetoes impossible settings, and wasted throws do nothing).
-A deterministic Kong throws barrels every few seconds according to your knobs."""
+A deterministic Kong throws barrels every few seconds according to your knobs.
+
+BARREL SUPPLY. When situation.barrels_left is a number, Kong has only that many barrels left this
+level (barrel_budget per level; refilled when the player reaches a new level, NOT when they lose a
+life). Once it hits 0 Kong is helpless until the next level, but barrels still unspent when the
+level ends are WASTED, and a level usually lasts 30-60 s: a passive Kong loses. Keep up steady
+pressure (throw_rate 0.5+), spend extra in bursts and ambushes where the player is weakest (ladders
+they favour, the climb to the goal), and plan to be nearly empty as they reach the top.
+
+TEMPER. The player can taunt you (situation.player_taunts, newest last); each taunt raises
+situation.kong.anger (0-100, it cools over time). At 100, or when you take the bait, Kong storms down
+to the player's girder for a few seconds and throws point-blank barrels (from your supply) at them.
+
+WHERE KONG IS (situation.kong). When Kong can move he roams a couple of girders ABOVE the player
+(climbing as they climb, up to the top girder) and throws from there, so barrels arrive sooner. If the
+player touches Kong anywhere but on the top girder he is DEFEATED and they clear the level.
+A taunt can be a bluff ("I'm taking the left ladder") or a dare meant to make you waste barrels."""
+
+VOICE_SYSTEM = """You are KONG in a terminal Donkey Kong game. The player just taunted you. Answer in
+character and decide whether to take the bait.
+
+Reply with JSON: say (<= 60 characters, playful, family-friendly, answering what they said) and charge
+(true = lose your temper NOW and storm down the ladders after them). Charging is a gamble: up close your
+point-blank barrels are deadly, but if the player touches you while you are down you are defeated and
+they clear the level. At anger 100 you charge anyway. Weigh your anger, barrels_left, where the player
+is (far below = long trip, near the top = they can reach you), and whether the taunt is bait or a bluff."""
+
+VOICE_SCHEMA = {"type": "object", "properties": {"say": {"type": "string"}, "charge": {"type": "boolean"}},
+                "required": ["say", "charge"], "additionalProperties": False}
 
 
 def _weighted(rng: random.Random, weights: dict, allowed=None) -> str:
@@ -75,10 +109,17 @@ class ParametricKong(Kong):
     def value(self, name: str):
         return self.knobs[name]
 
+    def _with_position(self, plan: dict) -> dict:
+        try:
+            plan["move_to"] = self.value("kong_x")
+        except KeyError:
+            pass
+        return plan
+
     def plan(self, obs: dict) -> dict:
         rules, interval, t = obs["rules"], obs["interval"], obs["t"]
         if t < self.hold_until:
-            return {"throws": []}
+            return self._with_position({"throws": []})
         cap = min(rules["max_throws_per_decision"], int(interval // rules["min_throw_gap"]) + 1)
         if self.rng.random() < self.value("burst_prob"):
             n, spacing = cap, rules["min_throw_gap"]
@@ -95,7 +136,7 @@ class ParametricKong(Kong):
         if self.value("ambush_on_climb") and obs["player"]["mode"] == "climb":
             fast = "fast" if "fast" in rules["speeds"] else "normal"
             throws.insert(0, {"delay": 0.0, "speed": fast, "route": "always"})
-        return {"throws": throws}
+        return self._with_position({"throws": throws})
 
 
 class RandomKnobKong(ParametricKong):
@@ -114,7 +155,8 @@ class RandomKnobKong(ParametricKong):
             mix = lambda names: {n: r.random() for n in names}  # noqa: E731
             self.knobs = {"throw_rate": r.random(), "speed_mix": mix(("slow", "normal", "fast")),
                           "route_mix": mix(ROUTE_NAMES), "burst_prob": r.random(), "ambush_on_climb": r.random() < 0.5,
-                          "rhythm_jitter": r.random(), "hold_back_s": r.choice([0.0, 0.0, 2.0, 4.0])}
+                          "rhythm_jitter": r.random(), "hold_back_s": r.choice([0.0, 0.0, 2.0, 4.0]),
+                          "kong_x": r.random()}
             self.hold_until = obs["t"] + self.knobs["hold_back_s"]
         return super().plan(obs)
 
@@ -122,6 +164,17 @@ class RandomKnobKong(ParametricKong):
 def snapshot_game(game):
     """Deep copy of the game for simulation, without the live Kong (threads, LLM clients)."""
     return copy.deepcopy(game, memo={id(game.kong): None})
+
+
+def playable_copy(game):
+    """A copy of a live game to simulate moves on. An LLM Kong (threads, network) can't be copied, so
+    the copy gets a deterministic stand-in with his current knobs; scripted Kongs are copied as-is."""
+    kong = game.kong
+    if not isinstance(kong, DirectorKong):
+        return copy.deepcopy(game)
+    stand_in = ParametricKong(kong.knobset.snapshot())
+    stand_in.rng, stand_in.hold_until = copy.deepcopy(kong.rng), kong.hold_until
+    return copy.deepcopy(game, memo={id(kong): stand_in})
 
 
 def simulate(snapshot, knobs: dict, rollout: int, seconds: float = 8.0) -> dict:
@@ -161,6 +214,54 @@ class DirectorKong(ParametricKong):
         self._seen = {"lives": None, "level": None}
         self._applied = 0
         self._announced_taunt = ""
+        self.player_taunts: list[dict] = []
+        self.voice = Layer.from_env("voice", "none", 300)
+        self._voice_pool = cf.ThreadPoolExecutor(max_workers=1)
+        self._voice_job: cf.Future | None = None
+        self._pending_taunt: str | None = None
+
+    def provoke(self, text: str, t: float) -> None:
+        """The player taunted Kong (the game has already raised his anger): answer fast, maybe charge."""
+        self.player_taunts = (self.player_taunts + [{"t": round(t, 1), "said": text}])[-5:]
+        self._pending_taunt = text
+        self._start_voice()
+
+    def _start_voice(self) -> None:
+        if self._pending_taunt is None or self.game is None or (self._voice_job and not self._voice_job.done()):
+            return
+        g, text = self.game, self._pending_taunt
+        self._pending_taunt = None
+        prompt = {"player_says": text, "your_anger": round(g.anger), "barrels_left": g.barrels_left,
+                  "player": {"floor": g.player.floor, "x": g.player.x, "mode": g.player.mode},
+                  "top_floor": g.layout.top, "lives": g.lives, "time_left": round(g.time_left),
+                  "you_are": g.kong_body.mode, "your_current_strategy": self.director.strategy,
+                  "what_you_know_about_them": self.director.opponent_model,
+                  "earlier_taunts": [x["said"] for x in self.player_taunts[:-1]]}
+        self._voice_job = self._voice_pool.submit(self.director.client.ask, self.voice, VOICE_SYSTEM, prompt,
+                                                  VOICE_SCHEMA, self._valid_voice)
+
+    @staticmethod
+    def _valid_voice(reply):
+        if not isinstance(reply, dict) or not isinstance(reply.get("say"), str) \
+                or not isinstance(reply.get("charge"), bool):
+            raise LLMError("bad voice reply")
+        return reply
+
+    def _voice_reply(self) -> dict | None:
+        job = self._voice_job
+        if job is None or not job.done():
+            return None
+        self._voice_job = None
+        try:
+            reply = job.result()
+        except Exception:      # LLMError or network trouble: the grunt already answered
+            reply = None
+        self._start_voice()    # a taunt that arrived meanwhile
+        if not reply:
+            return None
+        if reply["charge"] and self.game is not None:
+            self.game.provoke(0, charge=True)
+        return {"throws": [], "taunt": " ".join(reply["say"].split())[:60]}
 
     def attach(self, game) -> None:
         """Give the director's fairness guard access to the live game (for snapshots)."""
@@ -201,17 +302,21 @@ class DirectorKong(ParametricKong):
 
     def ready_plan(self):
         """Background mode: apply new knobs (and show the new strategy) as soon as they arrive."""
+        voice = self._voice_reply()
+        if voice:
+            return voice
         if not self.background or not self.director.poll():
             return None
         self._after_apply(self.game.t if self.game is not None else 0.0)
         return self._announce({"throws": []})
 
-    @staticmethod
-    def context(obs: dict) -> dict:
+    def context(self, obs: dict) -> dict:
         return {
             "t": obs["t"], "level": obs["level"], "lives": obs["lives"], "time_left": obs["time_left"],
             "player": obs["player"], "top_floor": obs["top_floor"], "goal_x": obs["goal_x"],
             "ladders": obs["ladders"], "rules": obs["rules"], "barrels_on_board": obs["barrels_on_board"],
+            "barrels_left": obs.get("barrels_left"), "barrel_budget": obs.get("barrel_budget"),
+            "player_taunts": self.player_taunts, "kong": obs.get("kong"),
             "player_habits": obs["habits"],
             "what_happened_to_recent_barrels": obs["barrel_outcomes"][-10:],
             "recent_events": [e for e in obs["recent_events"] if e["event"] not in ("taunt", "throw")][-8:],

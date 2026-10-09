@@ -35,9 +35,11 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 
 | Key | Action |
 |---|---|
-| ← → / A D / H L | walk (you can steer in the air) |
-| ↑ ↓ / W S / K J | climb up / down a ladder (step off mid-ladder to drop) |
+| ← → / A D | walk (you can steer in the air) |
+| ↑ ↓ / W S | climb up / down a ladder (step off mid-ladder to drop) |
 | Space / Enter | jump (hold for a little extra height) |
+| T | taunt Kong: ←→ pick a line, Enter sends, Esc cancels (once every 4 s) |
+| H | hand the game to an agent; H again takes it back (agent-assisted games don't set high scores) |
 | P | pause |
 | Q | end the game |
 
@@ -45,8 +47,28 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 
 | Kong | Style |
 |---|---|
-| **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds and after every life you lose. Its current plan is shown under the board |
+| **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds, after every life you lose, and when you taunt him. Its current plan is shown under the board |
 | Classic (no LLM) | Arcade rhythm: one barrel at a time, random routes. For testing without a key or network |
+
+**Kong moves and his barrels are limited**: he comes down from the top and roams about two girders
+above you, climbing as you climb (up to the top girder), and throws from wherever he is (AI Kong
+picks the spot, e.g. above a ladder you need). Catch him anywhere but the top girder and he's beaten.
+He has 45 barrels on level 1, 8 more each level, shown as `●×45` at the top; they refill on a new
+level, not when you lose a life.
+
+**Hand over to an agent**: press H and a lookahead agent plays for you (it simulates its moves a
+couple of seconds ahead); press H again to take back control. Handy for watching AI Kong think, or
+for getting past a hard spot. A game the agent helped with doesn't set a high score.
+
+**Taunts and Kong's temper**: press T and pick a line ("Bet you can't hit me on a ladder.", "I'm
+taking the left ladder." ...). Each taunt fills Kong's ANGER meter (it cools while he sits at the top),
+and he grunts at once. AI Kong then answers in his own words within a second or two, using a small,
+fast LLM call (no reasoning; set `KONG_VOICE_MODEL` to change it), and may **take the bait**. At full
+anger (three quick taunts) he loses his temper either way.
+
+An angry Kong storms down to your girder, throwing barrels on the way and from a few columns away
+(these come out of his supply). **Touch him and Kong is beaten**: +3000 and the level is cleared.
+After a few seconds on your girder he climbs back up, and you can still catch him on the way. Classic Kong has a temper too (grunts only, no LLM).
 
 Boards: **Random** (a new layout each game), **Classic**, **Tall** (6 girders), **Sparse** (a
 single ladder between girders). Use `--seed N` to replay the same board.
@@ -85,13 +107,21 @@ KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai       # more deliberate pla
 ```
 
 How it stays fair and lag-free:
-- The LLM never moves barrels itself. It sets 7 **knobs** for a deterministic Kong: throw rate,
-  speed mix, route mix, burst chance, ladder ambush, rhythm jitter and hold-back lulls.
+- The LLM never moves barrels itself. It sets 8 **knobs** for a deterministic Kong: throw rate,
+  speed mix, route mix, burst chance, ladder ambush, rhythm jitter, hold-back lulls and where Kong
+  stands.
 - Every change is clamped to limits, and changes are rate-limited.
 - A **fairness guard** simulates proposed changes with a near-perfect player and vetoes any that
   would make the game unwinnable.
 - The LLM runs in the background, so the game never waits for it. Until its first plan arrives,
   Kong plays its default tactics.
+
+How the LLM is used: it is far too slow to steer anything moment to moment, so it acts as a
+commander. Every ~20 seconds (and when you lose a life or clear a level) the strategist, with
+reasoning, studies your habits and sets Kong's 8 knobs (throwing tactics and where he stands); the
+engine carries that out every tick. Taunts go to a second,
+fast LLM call with no reasoning, so Kong answers in a second or two. The knob limits and fairness
+guard apply to everything the strategist decides.
 
 Only AI Kong uses the network: it sends OpenRouter a summary of the game state and your play
 statistics. Nothing else leaves your machine.

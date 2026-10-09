@@ -7,7 +7,8 @@
 
 Opponents: ai (AI Kong, an LLM that profiles how you play and re-plans Kong's tactics; needs an
 OpenRouter key, see README.md) and classic (scripted, no LLM: for testing without a key).
-Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), P pauses, Q quits.
+Keys: arrows / WASD move and climb, Space jumps (hold for extra height), T taunts Kong, H hands the
+game to an agent (H again takes it back), P pauses, Q quits.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ sys.path.insert(0, HERE)
 from director import load_api_key  # noqa: E402
 from dkgame.engine import CLASSIC_LAYOUT, TICK, Game, Params, generate_layout  # noqa: E402
 from dkgame.kongs import SCRIPTED  # noqa: E402
+from dkgame.lookahead import LookaheadPlayer  # noqa: E402
 from dkgame.render import centre, draw_game, needed_size, put, setup_colors  # noqa: E402
 
 OPPONENTS = [("ai", "AI Kong"), ("classic", "Classic (no LLM)")]   # dkgame.kongs has more scripted Kongs
@@ -33,10 +35,14 @@ BOARDS = [("random", "Random board"), ("classic", "Classic board"), ("tall", "Ta
           ("sparse", "Sparse (1 ladder each)")]
 KEYMAP = {curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right", curses.KEY_UP: "up", curses.KEY_DOWN: "down",
           ord("a"): "left", ord("d"): "right", ord("w"): "up", ord("s"): "down",
-          ord("h"): "left", ord("l"): "right", ord("k"): "up", ord("j"): "down",
           ord(" "): "jump", ord("\n"): "jump"}
 HOLD = {"left": 0.11, "right": 0.11, "up": 0.16, "down": 0.16, "jump": 0.2}   # no key-up events in terminals
-POINTS = {"climb": 100, "jump": 100, "stomp": 200, "level": 1000, "time": 10}
+TAUNTS = ["Is that all you've got?", "You throw like my grandma!", "Too slow, old ape!",
+          "Bet you can't hit me on a ladder.", "I'm taking the left ladder.", "I'm taking the right ladder.",
+          "You'll run out of barrels!", "Pauline's leaving with me!"]
+TAUNT_COOLDOWN = 4.0    # game seconds between taunts (each is one small, fast LLM call for AI Kong)
+TAUNT_ANGER = 40        # three quick taunts and Kong loses his temper
+POINTS = {"climb": 100, "jump": 100, "stomp": 200, "level": 1000, "time": 10, "kong": 3000}
 
 
 # --------------------------------------------------------------------------- scores
@@ -72,7 +78,7 @@ class Scorer:
 
     def __init__(self) -> None:
         self.score = 0
-        self.seen = {"climbs": 0, "jumped_over": 0, "stomps": 0, "levels": 0}
+        self.seen = {"climbs": 0, "jumped_over": 0, "stomps": 0, "levels": 0, "kong": 0}
         self.time_left = 0.0
         self.popups: list[dict] = []
 
@@ -80,12 +86,13 @@ class Scorer:
         s, p = game.stats, game.player
         gained = (POINTS["climb"] * (s["climbs"] - self.seen["climbs"])
                   + POINTS["jump"] * (s["jumped_over"] - self.seen["jumped_over"])
-                  + POINTS["stomp"] * (s["stomps"] - self.seen["stomps"]))
+                  + POINTS["stomp"] * (s["stomps"] - self.seen["stomps"])
+                  + POINTS["kong"] * (s["kong_defeats"] - self.seen["kong"]))
         cleared = game.levels_cleared - self.seen["levels"]
         if cleared:
             gained += cleared * (POINTS["level"] * game.level + POINTS["time"] * int(self.time_left))
         self.seen = {"climbs": s["climbs"], "jumped_over": s["jumped_over"], "stomps": s["stomps"],
-                     "levels": game.levels_cleared}
+                     "levels": game.levels_cleared, "kong": s["kong_defeats"]}
         self.time_left = game.time_left
         if gained:
             self.score += gained
@@ -99,7 +106,10 @@ def make_variant(board: str, seed: int):
     rng = random.Random(seed * 31 + 5)
     # endless (play for score), with a floatier jump than the engine default: same 2-row peak,
     # ~0.85 s in the air instead of ~0.6 s, so landings are readable at terminal frame rates
-    params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0)
+    # Kong throws ~75% faster than the engine's base pace, from 45 barrels on level 1 (+8 per level),
+    # and moves about
+    params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0, barrel_budget=45, barrel_budget_per_level=8,
+                    kong_interval=1.5, throw_gap_scale=0.45, extra_barrels=3, kong_moves=True)
     if board == "classic":
         return CLASSIC_LAYOUT, params
     floors = 6 if board == "tall" else None
@@ -181,11 +191,26 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
     win.nodelay(True)
     held: dict[str, float] = {}
     paused, next_tick = False, time.monotonic()
+    taunt = {"open": False, "pick": 0, "next": 0.0, "said": "", "until": 0.0}
+    agent, assisted = None, False             # H hands the controls to a lookahead agent and back
 
     def hud(banner: str = "") -> dict:
         plan = kong.display() if hasattr(kong, "display") else ""
+        said = taunt["said"] if game.t < taunt["until"] else ""
+        mode = game.kong_body.mode
+        if taunt["open"]:
+            footer = f"TAUNT ←{TAUNTS[taunt['pick']]:^35}→ ENTER/ESC"
+        elif mode == "rampage":
+            footer = "KONG IS DOWN!  Touch him to beat the level (+3000)"
+        elif mode == "return":
+            footer = "Kong is climbing back up... catch him!"
+        else:
+            wait = taunt["next"] - game.t
+            bar = "█" * int(game.anger / 10) + "░" * (10 - int(game.anger / 10))
+            footer = f"ANGER {bar}   " + ("T taunt Kong" if wait <= 0 else f"taunt in {int(wait) + 1}s")
+        controls = "AGENT PLAYING  ·  H take back   T taunt  P pause  Q quit" if agent else ""
         return {"score": scorer.score, "best": max(best, scorer.score), "opponent": label, "plan": plan,
-                "banner": banner, "popups": scorer.popups}
+                "banner": banner, "popups": scorer.popups, "said": said, "footer": footer, "controls": controls}
 
     while not game.over:
         now = time.monotonic()
@@ -193,16 +218,47 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             key = win.getch()
             if key == -1:
                 break
+            if taunt["open"]:                                   # picker: the game is paused
+                if key in (curses.KEY_LEFT, curses.KEY_UP, ord("a"), ord("w"), ord("h"), ord("k")):
+                    taunt["pick"] = (taunt["pick"] - 1) % len(TAUNTS)
+                elif key in (curses.KEY_RIGHT, curses.KEY_DOWN, ord("d"), ord("s"), ord("l"), ord("j")):
+                    taunt["pick"] = (taunt["pick"] + 1) % len(TAUNTS)
+                elif key in (10, 13, curses.KEY_ENTER, ord(" "), ord("t"), ord("T")):
+                    text = TAUNTS[taunt["pick"]]
+                    game.provoke(TAUNT_ANGER)                   # instant: anger, a grunt, maybe a rampage
+                    if hasattr(kong, "provoke"):
+                        kong.provoke(text, game.t)              # AI Kong answers properly a moment later
+                    taunt.update(open=False, said=text, until=game.t + 1.2, next=game.t + TAUNT_COOLDOWN)
+                elif key in (27, curses.KEY_BACKSPACE, 127, ord("q"), ord("Q")):
+                    taunt["open"] = False
+                next_tick = time.monotonic()
+                continue
             if key in (ord("q"), ord("Q")):
                 game.over = True
                 break
-            if key in (ord("p"), ord("P")):
+            if key in (ord("h"), ord("H")):
+                if agent is None:
+                    from dkgame.director_kong import playable_copy
+                    agent, assisted = LookaheadPlayer(copy_game=playable_copy), True
+                else:
+                    agent = None
+                held.clear()
+                continue
+            if key in (ord("t"), ord("T")) and game.t >= taunt["next"] and game.kong_body.mode == "perch":
+                taunt["open"] = True
+                held.clear()
+            elif key in (ord("p"), ord("P")):
                 paused = not paused
                 held.clear()
             elif key == curses.KEY_RESIZE:
                 pass
-            elif KEYMAP.get(key):
+            elif KEYMAP.get(key) and agent is None:
                 held[KEYMAP[key]] = now + HOLD[KEYMAP[key]]
+        if taunt["open"]:
+            draw_game(win, lay, game.state(), hud())
+            time.sleep(0.02)
+            next_tick = time.monotonic()
+            continue
         if paused:
             draw_game(win, lay, game.state(), hud(" PAUSED: press P to resume "))
             time.sleep(0.05)
@@ -212,7 +268,7 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             h, w = win.getmaxyx()
             need_h, need_w = needed_size(lay)
             if h >= need_h and w >= need_w:                    # freeze the game while the window is too small
-                game.step([k for k, until in held.items() if until >= now])
+                game.step(agent.act(game) if agent else [k for k, until in held.items() if until >= now])
                 scorer.update(game)
             next_tick += TICK
             if next_tick < now - 0.25:
@@ -220,11 +276,12 @@ def play(win, opponent: str, board: str, seed: int, scores: dict) -> str:
             draw_game(win, lay, game.state(), hud())
         time.sleep(max(0.0, min(0.01, next_tick - time.monotonic())))
 
-    new_best = scorer.score > best
+    new_best = scorer.score > best and not assisted          # games the agent helped with don't set records
     if new_best:
         scores[opponent] = scorer.score
         save_scores(scores)
-    summary = f" GAME OVER  score {scorer.score:06d}{'  NEW BEST!' if new_best else ''}  level {game.level} "
+    note = "  NEW BEST!" if new_best else "  (agent-assisted)" if assisted else ""
+    summary = f" GAME OVER  score {scorer.score:06d}{note}  level {game.level} "
     draw_game(win, lay, game.state(), {**hud(summary), "best": max(best, scorer.score)})
     put(win, 0, 0, "")
     centre(win, win.getmaxyx()[0] - 1, "R retry   M menu   Q quit", curses.A_BOLD)
@@ -287,6 +344,7 @@ def load_env_files() -> None:
 
 def main() -> None:
     load_env_files()
+    os.environ.setdefault("ESCDELAY", "25")      # curses waits 1 s after ESC by default
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS] + ["director"],
                         help="skip the menu and play this opponent (director = old name for ai)")

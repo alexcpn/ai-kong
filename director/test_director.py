@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from director import Director, FeasibilityGuard, KnobSet, KnobSpec, Layer, LLMError, Profiler  # noqa: E402
+from director import Commands, Director, FeasibilityGuard, KnobSet, KnobSpec, Layer, LLMError, Profiler  # noqa: E402
 
 
 def specs():
@@ -122,6 +122,26 @@ class DirectorTests(unittest.TestCase):
         self.assertEqual(d.history[0]["strategy"], "first")
         self.assertEqual(d.knobs["rate"], 0.9)
         self.assertEqual(d.taunt, "ha")                       # empty taunt keeps the old one
+
+    def test_commands_reach_the_game_with_notes(self):
+        applied = []
+
+        def apply(orders, t):
+            applied.append((orders, t))
+            return ["unit 3 does not exist"]
+
+        schema = {"type": "array", "items": {"type": "string"}}
+        cmds = Commands(schema=schema, apply=apply, description="unit orders", state=lambda: ["unit 1: idle"])
+        d = self.make([{**reply(FULL), "commands": ["unit 1: guard"]}, {**reply(FULL), "commands": []}],
+                      commands=cmds)
+        self.assertEqual(d.schema()["properties"]["commands"], schema)
+        self.assertIn("commands", d.schema()["required"])
+        d.update(1.0, {}, {})
+        self.assertEqual(applied, [(["unit 1: guard"], 1.0)])
+        d.update(21.0, {}, {})
+        prompt = d.client.prompts[1]
+        self.assertEqual(prompt["commands"], {"how": "unit orders", "current": ["unit 1: idle"]})
+        self.assertIn("unit 3 does not exist", prompt["notes_from_your_last_update"])
 
     def test_llm_failure_keeps_knobs_and_reports(self):
         d = self.make([LLMError("boom"), reply({**FULL, "rate": 0.6})])
