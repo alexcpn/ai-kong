@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Donkey Kong for the terminal, against a Kong that can think.
+"""AI Kong: Donkey Kong for the terminal, against a Kong that can think.
 
   python3 dk.py                            # title menu
-  python3 dk.py --kong director            # straight into a game vs the AI director
-  python3 dk.py --kong sniper --board tall --seed 7
+  python3 dk.py --kong ai                  # straight into a game vs AI Kong
+  python3 dk.py --kong classic --board tall --seed 7   # no LLM, for testing
 
-Opponents: classic, random, aim, sniper, trick (scripted), director (an LLM that profiles how you
-play and re-plans Kong's tactics; needs an OpenRouter key, see README.md).
+Opponents: ai (AI Kong, an LLM that profiles how you play and re-plans Kong's tactics; needs an
+OpenRouter key, see README.md) and classic (scripted, no LLM: for testing without a key).
 Keys: arrows / WASD / hjkl move and climb, Space jumps (hold for extra height), P pauses, Q quits.
 """
 
@@ -28,8 +28,7 @@ from dkgame.engine import CLASSIC_LAYOUT, TICK, Game, Params, generate_layout  #
 from dkgame.kongs import SCRIPTED  # noqa: E402
 from dkgame.render import centre, draw_game, needed_size, put, setup_colors  # noqa: E402
 
-OPPONENTS = [("classic", "Classic"), ("random", "Random"), ("aim", "Aim"), ("sniper", "Sniper"),
-             ("trick", "Trickster"), ("director", "AI Director")]
+OPPONENTS = [("ai", "AI Kong"), ("classic", "Classic (no LLM)")]   # dkgame.kongs has more scripted Kongs
 BOARDS = [("random", "Random board"), ("classic", "Classic board"), ("tall", "Tall (6 girders)"),
           ("sparse", "Sparse (1 ladder each)")]
 KEYMAP = {curses.KEY_LEFT: "left", curses.KEY_RIGHT: "right", curses.KEY_UP: "up", curses.KEY_DOWN: "down",
@@ -51,7 +50,10 @@ def load_scores() -> dict:
     try:
         with open(score_path(), encoding="utf-8") as handle:
             data = json.load(handle)
-        return {k: int(v) for k, v in data.items() if isinstance(v, (int, float)) and v >= 0}
+        scores = {k: int(v) for k, v in data.items() if isinstance(v, (int, float)) and v >= 0}
+        if "director" in scores:                      # AI Kong was called "director" before
+            scores["ai"] = max(scores.get("ai", 0), scores.pop("director"))
+        return scores
     except (OSError, ValueError, AttributeError):
         return {}
 
@@ -104,7 +106,7 @@ def make_variant(board: str, seed: int):
 
 
 def make_kong(name: str):
-    if name == "director":
+    if name == "ai":
         from director import Layer
         from dkgame.director_kong import DirectorKong
         return DirectorKong(background=True, layer=Layer.from_env("director", "medium", 8000))
@@ -117,8 +119,8 @@ TITLE = [
     "▐█▌  ●   ●   ●",
     "▀█▀            ",
     "",
-    "D O N K E Y   K O N G",
-    "against a Kong that thinks",
+    "A I   K O N G",
+    "Donkey Kong, against a Kong that thinks",
 ]
 
 
@@ -132,12 +134,12 @@ def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
             centre(win, top + i, line, curses.A_BOLD if i in (0, 1, 3) else 0)
         opp = OPPONENTS[choice["opponent"]]
         brd = BOARDS[choice["board"]]
-        rows = [f"Opponent:  <  {opp[1]:^14}  >", f"Board:     <  {brd[1]:^22}  >", "[  PLAY  ]", "[  QUIT  ]"]
+        rows = [f"Opponent:  <  {opp[1]:^16}  >", f"Board:     <  {brd[1]:^22}  >", "[  PLAY  ]", "[  QUIT  ]"]
         for i, text in enumerate(rows):
             centre(win, top + 7 + i * 2, text, curses.A_REVERSE if i == row else 0)
         best = scores.get(opp[0], 0)
         centre(win, top + 16, f"Best vs {opp[1]}: {best:06d}")
-        if opp[0] == "director":
+        if opp[0] == "ai":
             note = ("An LLM studies your habits and re-plans Kong's tactics every ~20 s."
                     if has_key else "Needs an OpenRouter key: see README.md (key file not found).")
             centre(win, top + 18, note)
@@ -159,7 +161,7 @@ def menu(win, choice: dict, scores: dict, has_key: bool) -> dict | None:
         elif key in (10, 13, curses.KEY_ENTER, ord(" ")):
             if row == 3:
                 return None
-            if OPPONENTS[choice["opponent"]][0] == "director" and not has_key:
+            if OPPONENTS[choice["opponent"]][0] == "ai" and not has_key:
                 continue
             return choice
 
@@ -246,7 +248,7 @@ def run(win, args) -> None:
     scores, has_key = load_scores(), load_api_key() is not None
     names = [o[0] for o in OPPONENTS]
     boards = [b[0] for b in BOARDS]
-    choice = {"opponent": names.index(args.kong) if args.kong else 3, "board": boards.index(args.board)}
+    choice = {"opponent": names.index(args.kong) if args.kong else (0 if has_key else 1), "board": boards.index(args.board)}
     skip_menu = args.kong is not None
     while True:
         if not skip_menu:
@@ -284,12 +286,15 @@ def load_env_files() -> None:
 def main() -> None:
     load_env_files()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS], help="skip the menu and play this opponent")
+    parser.add_argument("--kong", choices=[o[0] for o in OPPONENTS] + ["director"],
+                        help="skip the menu and play this opponent (director = old name for ai)")
     parser.add_argument("--board", choices=[b[0] for b in BOARDS], default="random")
     parser.add_argument("--seed", type=int, default=None, help="same seed = same board")
     args = parser.parse_args()
-    if args.kong == "director" and load_api_key() is None:
-        raise SystemExit("The AI Director needs an OpenRouter key: see README.md")
+    if args.kong == "director":
+        args.kong = "ai"
+    if args.kong == "ai" and load_api_key() is None:
+        raise SystemExit("AI Kong needs an OpenRouter key: see README.md")
     try:
         curses.wrapper(lambda win: run(win, args))
     except KeyboardInterrupt:

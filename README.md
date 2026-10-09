@@ -1,4 +1,6 @@
-# Donkey Kong, against a Kong that thinks
+# AI Kong
+
+Donkey Kong, against a Kong that thinks.
 
 A terminal Donkey Kong where Kong can be driven by an LLM that **studies how you play and re-plans
 its tactics**, without ever making the game lag. Pure Python standard library: no installs
@@ -9,22 +11,19 @@ its tactics**, without ever making the game lag. Pure Python standard library: n
 ```bash
 python3 dk.py                                      # menu: pick an opponent and a board
 
-# scripted Kongs, no key needed
-python3 dk.py --kong classic                       # arcade rhythm, the gentle start
-python3 dk.py --kong aim --board classic           # barrels aimed at your girder
-python3 dk.py --kong sniper --board tall           # broken timing, ladder ambushes, 6 girders
-python3 dk.py --kong trick --board sparse          # one ladder per girder, no escape routes
-python3 dk.py --kong random --seed 7               # same seed = same board, to practise a layout
+# no LLM, for testing without a key
+python3 dk.py --kong classic
+python3 dk.py --kong classic --board tall --seed 7 # same seed = same board
 
-# the AI Director (needs an OpenRouter key, see below)
-python3 dk.py --kong director
-KONG_DIRECTOR_REASONING=high python3 dk.py --kong director --board tall
+# AI Kong (needs an OpenRouter key, see below)
+python3 dk.py --kong ai
+KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai --board tall
 ```
 
-Options: `--kong classic|random|aim|sniper|trick|director`, `--board random|classic|tall|sparse`,
+Options: `--kong ai|classic`, `--board random|classic|tall|sparse`,
 `--seed N`. Without `--kong` you get the menu.
 
-To configure the AI Director from files instead of the shell, put the key in
+To configure AI Kong from files instead of the shell, put the key in
 `.config/opneroutere.env` (git-ignored; copy `.config/opneroutere.env.ex`) and settings in
 `.config/config.env`, then `pip install python-dotenv`. `dk.py` loads both at start-up, and
 variables already set in your shell take precedence.
@@ -46,12 +45,8 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 
 | Kong | Style |
 |---|---|
-| Classic | Arcade rhythm: one barrel at a time, random routes |
-| Random | Anything goes |
-| Aim | Sends barrels down toward your girder, faster as you climb |
-| Sniper | Slow/fast pairs to break your timing; fires at you the moment you're on a ladder |
-| Trickster | Barrels that skip the ladders you expect, irregular bursts |
-| **AI Director** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds and after every life you lose. Its current plan is shown under the board |
+| **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds and after every life you lose. Its current plan is shown under the board |
+| Classic (no LLM) | Arcade rhythm: one barrel at a time, random routes. For testing without a key or network |
 
 Boards: **Random** (a new layout each game), **Classic**, **Tall** (6 girders), **Sparse** (a
 single ladder between girders). Use `--seed N` to replay the same board.
@@ -70,7 +65,7 @@ The game is endless; you play for score. High scores are kept per opponent, in
 
 You have 3 lives, and each level has a time limit: running out costs a life. Each level is harder.
 
-## The AI Director
+## AI Kong
 
 It needs an [OpenRouter](https://openrouter.ai) API key. Create the key file once in your own terminal:
 
@@ -85,8 +80,8 @@ reasoning; at about one call every 20 seconds that should cost in the region of 
 of play (an estimate). To use another model:
 
 ```bash
-KONG_DIRECTOR_MODEL=openai/gpt-oss-120b python3 dk.py --kong director
-KONG_DIRECTOR_REASONING=high python3 dk.py --kong director       # more deliberate plans
+KONG_DIRECTOR_MODEL=openai/gpt-oss-120b python3 dk.py --kong ai
+KONG_DIRECTOR_REASONING=high python3 dk.py --kong ai       # more deliberate plans
 ```
 
 How it stays fair and lag-free:
@@ -98,7 +93,7 @@ How it stays fair and lag-free:
 - The LLM runs in the background, so the game never waits for it. Until its first plan arrives,
   Kong plays its default tactics.
 
-Only the AI Director uses the network: it sends OpenRouter a summary of the game state and your play
+Only AI Kong uses the network: it sends OpenRouter a summary of the game state and your play
 statistics. Nothing else leaves your machine.
 
 ## How it's built
