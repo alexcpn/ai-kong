@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curses
+import textwrap
 
 PAIRS = {"girder": 1, "danger": 2, "ladder": 3, "player": 4, "goal": 5, "ui": 6}
 
@@ -42,7 +43,7 @@ def centre(win, y: int, text: str, attr: int = 0) -> None:
 
 
 def needed_size(layout: dict) -> tuple[int, int]:
-    return layout["floors"][0] + 7, layout["width"] + 2
+    return layout["floors"][0] + 8, layout["width"] + 2
 
 
 def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
@@ -67,7 +68,7 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
         put(win, 1, left, f'YOU: "{hud["said"]}"'[: layout["width"]], c("player") | curses.A_BOLD)
     elif taunt:
         put(win, 1, left, f'KONG: "{taunt}"'[: layout["width"]], c("danger") | curses.A_BOLD)
-    oy = 2
+    oy = 3                                                # header, Kong's speech, then room for his head
     floors = layout["floors"]
     for i, row in enumerate(floors):
         slope = "\\" if i % 2 == 0 else "/"
@@ -81,6 +82,7 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     kx, ky = kong.get("x", layout["x_min"] + 1), int(kong.get("y", top) + 0.5)
     loose = kong.get("mode", "perch") != "perch"
     look = c("danger") | curses.A_BOLD | (curses.A_REVERSE if loose else 0)
+    put(win, oy + ky - 2, left + kx - 1, "ò ò", look)     # head: just his eyes
     put(win, oy + ky - 1, left + kx - 1, "▐█▌", look)
     put(win, oy + ky, left + kx - 1, "/▀\\" if loose else " ▀ ", look)
     put(win, oy + top - 1, left + layout["goal"]["x"] - 1, " O ", c("goal") | curses.A_BOLD)
@@ -94,8 +96,12 @@ def draw_game(win, layout: dict, s: dict, hud: dict) -> None:
     if not (p["invulnerable"] and int(s["t"] * 6) % 2):
         put(win, oy + int(p["y"] + 0.5), left + p["x"], "@", c("player") | curses.A_BOLD)
     bottom = oy + floors[0] + 2
-    if hud.get("plan"):
-        put(win, bottom, left, f"Kong's plan: {hud['plan']}"[: layout["width"]], c("goal"))
+    if hud.get("plan"):                                  # wrapped to the board's width, under the board
+        rows = max(1, min(3, h - bottom - 2))            # leave room for the controls and footer rows
+        lines = textwrap.wrap(f"Kong's plan: {hud['plan']}", layout["width"], max_lines=rows, placeholder=" …")
+        for i, ln in enumerate(lines):
+            put(win, bottom + i, left, ln, c("player") | curses.A_BOLD)
+        bottom += len(lines) - 1
     put(win, bottom + 1, left, "←→ move  ↑↓ climb  SPACE jump  T taunt  P pause  Q quit", c("ui"))
     if hud.get("footer"):
         put(win, bottom + 2, left, hud["footer"][: max(layout["width"], w - left)],

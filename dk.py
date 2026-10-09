@@ -106,10 +106,13 @@ def make_variant(board: str, seed: int):
     rng = random.Random(seed * 31 + 5)
     # endless (play for score), with a floatier jump than the engine default: same 2-row peak,
     # ~0.85 s in the air instead of ~0.6 s, so landings are readable at terminal frame rates
-    # Kong throws ~75% faster than the engine's base pace, from 45 barrels on level 1 (+8 per level),
-    # and moves about
+    # Kong throws ~40% more often than the engine's base pace, from 45 barrels on level 1 (+8 per level),
+    # roaming three girders above the player; 3 s of grace after losing a life.
+    # Difficulty levers: throw_gap_scale / extra_barrels / kong_interval (pace), kong_floors_above
+    # (reaction time: barrels from further up take longer to arrive), invuln_time.
     params = Params(max_levels=99, gravity=20.0, jump_velocity=9.0, barrel_budget=45, barrel_budget_per_level=8,
-                    kong_interval=1.5, throw_gap_scale=0.45, extra_barrels=3, kong_moves=True)
+                    kong_interval=2.0, throw_gap_scale=0.6, extra_barrels=2, kong_moves=True, kong_floors_above=3,
+                    invuln_time=3.0)
     if board == "classic":
         return CLASSIC_LAYOUT, params
     floors = 6 if board == "tall" else None

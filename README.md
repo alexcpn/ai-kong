@@ -39,7 +39,7 @@ To configure AI Kong from files instead of the shell, put the key in
 `.config/config.env`, then `pip install python-dotenv`. `dk.py` loads both at start-up, and
 variables already set in your shell take precedence.
 
-Use a terminal of at least 60 × 24 (60 × 28 for the Tall board). Pick an opponent and a board in the menu, then climb to Pauline (`|♀|`)
+Use a terminal of at least 60 × 25 (60 × 29 for the Tall board). Pick an opponent and a board in the menu, then climb to Pauline (`|♀|`)
 at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the girders too.
 
 ## Controls
@@ -60,7 +60,7 @@ at the top while Kong throws barrels. From level 2, fireballs (`※`) roam the g
 | **AI Kong** | An LLM watches your habits (where you wait, how early you jump, which ladders you use, how you died) and re-plans Kong's tactics every ~20 seconds, after every life you lose, and when you taunt him. Its current plan is shown under the board |
 | Classic (no LLM) | Arcade rhythm: one barrel at a time, random routes. For testing without a key or network |
 
-**Kong moves and his barrels are limited**: he comes down from the top and roams about two girders
+**Kong moves and his barrels are limited**: he comes down from the top and roams about three girders
 above you, climbing as you climb (up to the top girder), and throws from wherever he is (AI Kong
 picks the spot, e.g. above a ladder you need). Catch him anywhere but the top girder and he's beaten.
 He has 45 barrels on level 1, 8 more each level, shown as `●×45` at the top; they refill on a new
@@ -130,7 +130,7 @@ fast LLM call with no reasoning, so Kong answers in a second or two. The knob li
 guard apply to everything the strategist decides.
 
 The screen shows what this costs as you play: the running total at the right of the bottom row, and,
-if your terminal has a spare row (25+ rows; ~90 columns shows it in full), which models play Kong, their average
+if your terminal has a spare row (26+ rows; ~90 columns shows it in full), which models play Kong, their average
 reply time and the number of calls. The menu shows the models before you start, and the game-over
 line the total.
 

@@ -66,7 +66,7 @@ TEMPER. The player can taunt you (situation.player_taunts, newest last); each ta
 situation.kong.anger (0-100, it cools over time). At 100, or when you take the bait, Kong storms down
 to the player's girder for a few seconds and throws point-blank barrels (from your supply) at them.
 
-WHERE KONG IS (situation.kong). When Kong can move he roams a couple of girders ABOVE the player
+WHERE KONG IS (situation.kong). When Kong can move he roams a few girders ABOVE the player
 (climbing as they climb, up to the top girder) and throws from there, so barrels arrive sooner. If the
 player touches Kong anywhere but on the top girder he is DEFEATED and they clear the level.
 A taunt can be a bluff ("I'm taking the left ladder") or a dare meant to make you waste barrels."""
