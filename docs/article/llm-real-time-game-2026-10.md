@@ -12,7 +12,7 @@ Chips like Cerebras, which keep weights in on-chip memory, make serving fast. I 
 
 Even on Cerebras, a reasoned strategy call takes about 2 s. That is too slow for driving, robots or embedded systems.
 
-In October 2026 an LLM can sit inside a real-time game at three speeds: about 0.4 s for a spoken reply, about 1 s for a per-move tactical choice, and about 2 s for a reasoned strategy. That is fast enough for a decision every 2 seconds, and still 20 to 50 times too slow for a single 50 ms frame.
+In October 2026 an LLM can sit inside a real-time game at three speeds: about 0.4 s for a spoken reply, about 1 s for a per-move tactical choice, and about 2 s for a reasoned strategy. That is fast enough for a decision every 2 seconds, and still 20 to 50 times too slow for a single 50 ms frame. The per-move choice no longer needs the cloud: a 4.6 GB Gemma 4 E2B on a laptop GPU makes it in 0.51 s.
 
 ## The problem: seconds against milliseconds
 
@@ -119,10 +119,28 @@ We checked what each model decided, not only how fast: 8 tactician calls on one 
 
 So a small local model can run the fast layer below a second, the way Helix's System 1 runs on the robot, while the slow strategist stays in the cloud. For per-frame control the better route is still a tiny policy trained on the tactician's decisions, running inside the game in under a millisecond.
 
+## Groq or Cerebras, and a new kind of model
+
+For quick decisions use a small model on Groq; for long reasoned plans use Cerebras. A new class of decision models removes text generation altogether.
+
+| Tactician call, same request, same hour (10 Oct 2026) | Median | Cost per call | What it decided |
+| --- | --- | --- | --- |
+| gpt-oss-20b @ Groq, low reasoning | 0.70 s | $0.00012 | 2 throws every call, mostly the route the plan asked for; Kong only at the ends |
+| gpt-oss-120b @ Cerebras, low reasoning | 0.97 s | $0.00065 | 1 to 2 throws, follows the plan, varies where Kong stands |
+| gpt-oss-120b @ Groq, low reasoning | 1.14 s | $0.00032 | 0 to 2 throws, follows the plan |
+| Microsoft-Decision-1, via OpenRouter | 0.72 s (worst 1.59 s) | $0.000013 | the same choice in 8 of 8 calls; always a valid option |
+
+This is not a pure chip race: Cerebras does not serve gpt-oss-20b on OpenRouter, so the comparison is a small model on Groq against a large one on Cerebras. The small model wins short answers because it thinks for about 20 tokens against about 170 for gpt-oss-120b at the same setting. In an earlier run the two tied at 0.63 s median, but Cerebras had a 2.48 s worst call against 0.93 s for Groq. Cerebras wins where output is long: the same gpt-oss-120b wrote a reasoned strategy in 2.1 s on Cerebras and 4.6 s on Groq.
+
+**Decision models.** [Microsoft-Decision-1](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/), released on 8 to 9 October 2026 and post-trained from Qwen3.5-9B according to press coverage, does not write text. It reads a situation and returns a calibrated probability for each fixed answer option, in one pass with a single output token. On OpenRouter it is not a chat model: it is called at `/api/alpha/decisions` with a `state` and named `questions`, each a yes/no probability (`noul`), a `choice` between described options, or a `score` against a rubric. One call answered everything a throw needs (throw now, route, speed, where to stand) in 0.72 s for $0.000013, about ten times cheaper than gpt-oss-20b on Groq.
+
+Three properties matter for games. Its answer is always one of the options, so it cannot return an illegal speed or broken JSON. Its probabilities can drive a weighted random choice, so Kong mixes routes in proportion instead of always taking the top pick. And with one output token, most of its 0.7 s is probably the network round trip to Azure, not the model; Microsoft publishes no millisecond figures and does not release the weights, so it cannot run locally, and all its benchmark claims are still unverified. It is the robot pattern again: the fast layer should choose, not write.
+
 ## Reproduce it
 
-The game, the director library and the benchmark scripts are in [github.com/alexcpn/ai-kong](https://github.com/alexcpn/ai-kong). The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](https://github.com/alexcpn/ai-kong/blob/main/docs/llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](https://github.com/alexcpn/ai-kong/tree/main/docs/llm-speed) re-run each measurement through OpenRouter for well under a cent each (`bench_local_ollama.py` and `bench_tactics_quality.py` cover the local GPU). The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](https://github.com/alexcpn/ai-kong/blob/main/.config/config.env).
+The game, the director library and the benchmark scripts are in [github.com/alexcpn/ai-kong](https://github.com/alexcpn/ai-kong). The raw figures, sources and methods are in [`docs/llm-speed/data-2026-10.json`](https://github.com/alexcpn/ai-kong/blob/main/docs/llm-speed/data-2026-10.json), and [`docs/llm-speed/bench_*.py`](https://github.com/alexcpn/ai-kong/tree/main/docs/llm-speed) re-run each measurement through OpenRouter for well under a cent each (`bench_local_ollama.py` and `bench_tactics_quality.py` cover the local GPU, `bench_decision1.py` the decision model). The game ships with the cheap Haiku setup; the fast setup is one block in [`.config/config.env`](https://github.com/alexcpn/ai-kong/blob/main/.config/config.env).
 
 ## Sources
 
+- [Microsoft: Introducing Microsoft-Decision-1](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/): what the decision model is, question types, pricing
 - [Artificial Analysis: gpt-oss-120B API providers](https://artificialanalysis.ai/models/gpt-oss-120b/providers): speed and first-chunk latency per provider, P50 over 72 hours, 10,000-token input

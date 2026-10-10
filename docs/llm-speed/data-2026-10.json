@@ -461,6 +461,77 @@
         "Gemma 4 and Qwen 3.5 think by default; without reasoning effort 'none' Gemma 4 E2B spent all 400 output tokens thinking and returned no JSON",
         "a stale Ollama runner held 1.8 GB of VRAM; Qwen first loaded 71% on CPU (2.3 s / 5-6.4 s) until all models were stopped"
       ]
+    },
+    "decision_model": {
+      "model": "microsoft/microsoft-decision-1 (microsoft-decision-1-20261009, served by Azure via OpenRouter)",
+      "what": "decisions model (post-trained from Qwen3.5-9B per press coverage): returns calibrated probabilities over fixed options, no text. Called at OpenRouter's /api/alpha/decisions with {model, state, questions}; question types noul (yes/no probability), choice (criteria: option -> description), score (criteria: rubric list)",
+      "script": "bench_decision1.py",
+      "tactician_one_call": {
+        "questions": [
+          "throw (noul)",
+          "route (choice of 4)",
+          "speed (choice of 2)",
+          "stand (choice of 3)"
+        ],
+        "input_tokens": 321,
+        "first_s": 5.67,
+        "warm_median_s": 0.72,
+        "warm_worst_s": 1.59,
+        "usd_per_call": 1.3e-05,
+        "answers": "8/8 identical choices: toward_player (p 0.63-0.72), slow, left; throw probability 0.44-0.47"
+      },
+      "single_question_s": [
+        1.56,
+        1.37,
+        0.56
+      ],
+      "notes": [
+        "not usable via chat/completions (HTTP 400: use /api/alpha/decisions)",
+        "weights not distributed: no local option",
+        "output is always one of the given options, so no illegal values"
+      ]
+    },
+    "groq_vs_cerebras_tactician": {
+      "what": "same tactician request, 8 calls each, same hour (2026-10-10), reasoning low, strict JSON; Cerebras does not serve gpt-oss-20b on OpenRouter (providers: Groq, DeepInfra, Google, Bedrock, Parasail, CoreWeave, ...)",
+      "script": "bench_tactics_quality.py",
+      "rows": [
+        {
+          "model": "openai/gpt-oss-20b",
+          "provider": "groq",
+          "median_s": 0.7,
+          "decided": "2 throws every call, 12/16 'always' (the plan), kong_x only 0.1 or 1.0"
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "cerebras",
+          "median_s": 0.97,
+          "decided": "1-2 throws, 11/14 'always', kong_x varied (5 values)"
+        },
+        {
+          "model": "openai/gpt-oss-120b",
+          "provider": "groq",
+          "median_s": 1.14,
+          "decided": "0-2 throws, 9/11 'always'"
+        }
+      ],
+      "earlier_same_request": {
+        "gpt-oss-20b@groq": {
+          "median_s": 0.63,
+          "worst_of_5_s": 0.93
+        },
+        "gpt-oss-120b@cerebras": {
+          "median_s": 0.63,
+          "worst_of_5_s": 2.48
+        }
+      },
+      "reasoning_tokens_per_call": {
+        "gpt-oss-20b@groq low": 20,
+        "gpt-oss-120b low": "172-184"
+      },
+      "strategy_call_same_model": {
+        "gpt-oss-120b@cerebras medium": 2.11,
+        "gpt-oss-120b@groq medium": 4.59
+      }
     }
   }
 }
